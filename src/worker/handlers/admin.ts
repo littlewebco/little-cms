@@ -1,11 +1,28 @@
 /**
  * Worker handler for serving admin UI
+ * The index.html content is embedded at build time to ensure correct asset references
  */
 interface Env {
   SESSIONS?: KVNamespace;
-  __STATIC_CONTENT?: any; // For asset serving
-  __STATIC_CONTENT_MANIFEST?: any; // Asset manifest
+  ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
+
+// Embedded index.html content (generated at build time)
+const INDEX_HTML = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LittleCMS Admin</title>
+    <script type="module" crossorigin src="/assets/index-mTk3WK3_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CI894KBj.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+
+`;
 
 export async function handleAdmin(request: Request, env?: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -19,30 +36,12 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
   
   // Serve index.html for root path
   if (path === '/' || path === '/index.html') {
-    // Serve the actual built index.html
-    // Note: Assets are served from /assets/ (not /admin/assets/) 
-    // The main worker handles /assets/* requests using the ASSETS binding
-    // which maps ./dist/admin/assets/* to /assets/*
-    return new Response(
-      `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LittleCMS Admin</title>
-    <script type="module" crossorigin src="/assets/index-ClJ6TX0_.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-H3luEsyq.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
-</html>`,
-      {
-        headers: {
-          'Content-Type': 'text/html',
-        },
-      }
-    );
+    // Serve the embedded index.html content
+    return new Response(INDEX_HTML, {
+      headers: {
+        'Content-Type': 'text/html',
+      },
+    });
   }
   
   // Assets are handled by the main worker's ASSETS binding
@@ -50,4 +49,3 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
   
   return new Response('Not Found', { status: 404 });
 }
-

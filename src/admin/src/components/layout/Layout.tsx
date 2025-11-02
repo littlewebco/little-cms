@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { Outlet } from 'react-router-dom';
 import { useAuth, useLogout } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 
@@ -47,6 +48,7 @@ export default function Layout({ children }: LayoutProps) {
         </div>
       </header>
       <main className="container mx-auto px-4 py-8">
+        <Outlet />
         {children}
       </main>
     </div>

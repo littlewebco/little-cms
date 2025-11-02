@@ -8,9 +8,9 @@
     "little-cms": "./bin/little-cms.js"
   },
   "scripts": {
-    "build": "npm run build:worker && (npm run build:admin || echo 'Admin UI build skipped')",
+    "build": "npm run build:admin && node scripts/embed-admin-html.js && npm run build:worker",
     "build:admin": "cd src/admin && npm install && npm run build",
-    "build:worker": "esbuild src/worker/index.ts --bundle --outfile=dist/worker.js --format=iife --platform=browser --target=es2022",
+    "build:worker": "esbuild src/worker/index.ts --bundle --outfile=dist/worker.js --format=esm --platform=neutral --target=es2022",
     "build:cli": "esbuild src/cli/*.ts --bundle --outdir=dist/cli --format=esm --platform=node --target=node20",
     "deploy": "wrangler deploy",
     "dev": "npm run dev:admin",

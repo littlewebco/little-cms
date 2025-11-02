@@ -52,6 +52,13 @@ export class GitHubAPI {
   }
 
   /**
+   * Make a public GitHub API request (exposed for use in handlers)
+   */
+  async apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    return this.request<T>(endpoint, options);
+  }
+
+  /**
    * Get file contents
    */
   async getFile(owner: string, repo: string, path: string, ref = 'main'): Promise<GitHubFile> {

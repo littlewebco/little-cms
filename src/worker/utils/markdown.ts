@@ -2,7 +2,14 @@
  * Markdown rendering utility for LittleCMS
  * Converts markdown to HTML
  */
-export function renderMarkdown(md: string): string {
+/**
+ * Markdown rendering utility for LittleCMS
+ * Converts markdown to HTML
+ * @param md - Markdown content
+ * @param repo - Repository in format "owner/repo" (e.g., "littlewebco/little-blog")
+ * @param filePath - Path to the current file (for resolving relative image paths)
+ */
+export function renderMarkdown(md: string, repo?: string, filePath?: string): string {
   let html = md
     // Escape HTML first to prevent injection via Markdown
     .replace(/</g, "&lt;")
@@ -22,6 +29,34 @@ export function renderMarkdown(md: string): string {
     .replace(/_(.*?)_/gim, '<em>$1</em>')
     // Links [text](url) - with security attributes
     .replace(/\[(.*?)\]\((.*?)\)/gim, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    // Images ![alt](url) - convert relative paths to GitHub raw URLs if repo provided
+    .replace(/!\[(.*?)\]\((.*?)\)/gim, (match, alt, url) => {
+      // If it's already a full URL, use it as-is
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return `<img src="${url}" alt="${alt}" />`;
+      }
+      // If repo is provided, resolve relative image paths
+      if (repo) {
+        const [owner, repoName] = repo.split('/');
+        const branch = 'main'; // Default branch, could be made configurable
+        
+        let imagePath = url;
+        // If filePath is provided and URL is relative, resolve it relative to the file
+        if (filePath && !url.startsWith('/')) {
+          const fileDir = filePath.substring(0, filePath.lastIndexOf('/'));
+          if (fileDir) {
+            imagePath = `${fileDir}/${url}`;
+          } else {
+            imagePath = url;
+          }
+        }
+        
+        const githubRawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}/${imagePath}`;
+        return `<img src="${githubRawUrl}" alt="${alt}" />`;
+      }
+      // Fallback: use URL as-is
+      return `<img src="${url}" alt="${alt}" />`;
+    })
     // Code blocks (```lang\ncode\n```)
     .replace(/```(\w+)?\n([\s\S]*?)?\n```/gim, (match, lang, code) => {
       const languageClass = lang ? ` class="language-${lang}"` : '';
@@ -40,7 +75,7 @@ export function renderMarkdown(md: string): string {
   // Wrap paragraphs
   html = html.split('\n').map(line => {
     line = line.trim();
-    if (line.length === 0 || line.match(/^<\/?(h[1-6]|ul|ol|li|pre|code|a|strong|em)/)) {
+    if (line.length === 0 || line.match(/^<\/?(h[1-6]|ul|ol|li|pre|code|a|strong|em|img)/)) {
       return line;
     }
     // Avoid wrapping lines in pre blocks

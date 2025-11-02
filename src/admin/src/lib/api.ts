@@ -38,26 +38,90 @@ export const api = {
     session: () => apiRequest<AuthSession>('/auth/session'),
   },
 
-  // Content endpoints
-  content: {
-    list: (repo: string, path?: string) =>
-      apiRequest(`/content/${repo}${path ? `?path=${path}` : ''}`),
-    get: (repo: string, path: string) =>
-      apiRequest(`/content/${repo}/${encodeURIComponent(path)}`),
-    create: (repo: string, path: string, content: string) =>
-      apiRequest(`/content/${repo}/${encodeURIComponent(path)}`, {
+  // Repository endpoints
+  repos: {
+    list: () => apiRequest<{ repos: Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      owner: string;
+      private: boolean;
+      description: string | null;
+      default_branch: string;
+      selected: boolean;
+    }> }>('/repos/list'),
+    select: (repos: string[]) => apiRequest<{ success: boolean; repos: string[] }>('/repos/select', {
+      method: 'POST',
+      body: JSON.stringify({ repos }),
+    }),
+    selected: () => apiRequest<{ repos: string[] }>('/repos/selected'),
+  },
+
+  // Preview endpoints
+  preview: {
+    render: (markdown: string, repo?: string, filePath?: string) =>
+      apiRequest<{ html: string }>('/preview', {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ markdown, repo, filePath }),
       }),
-    update: (repo: string, path: string, content: string) =>
-      apiRequest(`/content/${repo}/${encodeURIComponent(path)}`, {
+  },
+
+  // Content endpoints
+  // repo format: "owner/repo" (e.g., "littlewebco/little-blog")
+  content: {
+    list: (repo: string, path?: string) => {
+      const [owner, repoName] = repo.split('/');
+      if (!owner || !repoName) {
+        throw new Error('Invalid repository format. Expected "owner/repo"');
+      }
+      const url = `/content/${owner}/${repoName}`;
+      if (path) {
+        return apiRequest(`${url}?path=${encodeURIComponent(path)}`);
+      }
+      return apiRequest(url);
+    },
+    get: (repo: string, path: string) => {
+      const [owner, repoName] = repo.split('/');
+      if (!owner || !repoName) {
+        throw new Error('Invalid repository format. Expected "owner/repo"');
+      }
+      // Split path by / and encode each segment separately to preserve slashes
+      const pathSegments = path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      return apiRequest(`/content/${owner}/${repoName}/${pathSegments}`);
+    },
+    create: (repo: string, path: string, content: string, message: string) => {
+      const [owner, repoName] = repo.split('/');
+      if (!owner || !repoName) {
+        throw new Error('Invalid repository format. Expected "owner/repo"');
+      }
+      const pathSegments = path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      return apiRequest(`/content/${owner}/${repoName}/${pathSegments}`, {
+        method: 'POST',
+        body: JSON.stringify({ content, message }),
+      });
+    },
+    update: (repo: string, path: string, content: string, message: string) => {
+      const [owner, repoName] = repo.split('/');
+      if (!owner || !repoName) {
+        throw new Error('Invalid repository format. Expected "owner/repo"');
+      }
+      const pathSegments = path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      return apiRequest(`/content/${owner}/${repoName}/${pathSegments}`, {
         method: 'PUT',
-        body: JSON.stringify({ content }),
-      }),
-    delete: (repo: string, path: string) =>
-      apiRequest(`/content/${repo}/${encodeURIComponent(path)}`, {
+        body: JSON.stringify({ content, message }),
+      });
+    },
+    delete: (repo: string, path: string, message: string) => {
+      const [owner, repoName] = repo.split('/');
+      if (!owner || !repoName) {
+        throw new Error('Invalid repository format. Expected "owner/repo"');
+      }
+      const pathSegments = path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+      return apiRequest(`/content/${owner}/${repoName}/${pathSegments}`, {
         method: 'DELETE',
-      }),
+        body: JSON.stringify({ message }),
+      });
+    },
   },
 };
 

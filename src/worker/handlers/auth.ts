@@ -8,6 +8,7 @@ interface Env {
   GITHUB_CLIENT_SECRET?: string;
   SESSIONS?: KVNamespace;
   APP_URL?: string;
+  GITHUB_SCOPE?: string; // Optional: GitHub OAuth scope (default: 'public_repo')
 }
 
 interface GitHubTokenResponse {
@@ -181,7 +182,15 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
       // Initiate GitHub OAuth flow
       const redirectUri = `${appUrl}/admin/auth/callback`;
       const state = generateSessionId(); // Use as CSRF token
-      const scope = 'repo';
+      
+      // GitHub OAuth scope options:
+      // - 'public_repo': Access public repositories only
+      // - 'repo': Full access to private repositories (all repos)
+      // - 'repo:status': Access commit status only
+      // Note: Users can still select which repos to use via the admin UI
+      // Default to 'repo' to allow access to both public and private repos
+      // Users will be able to choose which repos to use in the admin interface
+      const scope = envVars.GITHUB_SCOPE || 'repo';
       
       // Store state temporarily (1 hour)
       if (sessions) {

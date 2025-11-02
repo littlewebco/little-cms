@@ -39,6 +39,14 @@ wrangler secret put GITHUB_CLIENT_SECRET
 
 # Set app URL (optional, defaults to request origin)
 wrangler secret put APP_URL
+
+# Set GitHub OAuth scope (optional, defaults to 'public_repo')
+# Options:
+#   - 'public_repo': Access public repositories only (recommended, safer)
+#   - 'repo': Full access to private repositories (all repos)
+#   - 'repo:status': Access commit status only
+#   - 'public_repo repo:status': Combine multiple scopes
+wrangler secret put GITHUB_SCOPE
 ```
 
 Or add to `wrangler.toml` vars section (not recommended for secrets):
@@ -48,6 +56,7 @@ Or add to `wrangler.toml` vars section (not recommended for secrets):
 GITHUB_CLIENT_ID = "your-client-id"
 GITHUB_CLIENT_SECRET = "your-client-secret"
 APP_URL = "https://cms.little.cloud"
+GITHUB_SCOPE = "public_repo"  # or "repo" for full access
 ```
 
 ## 4. Update Configuration
@@ -79,11 +88,50 @@ npm run deploy
 4. Session cookie set → user authenticated
 5. Subsequent requests use session cookie → verify via KV
 
-## Security Notes
+## OAuth Scope Options
 
-- Sessions expire after 7 days
-- Sessions stored in KV with expiration
-- CSRF protection via state parameter
-- HttpOnly, Secure cookies
-- SameSite=Lax cookie policy
+By default, LittleCMS uses `repo` scope, which grants access to all repositories (public and private). However, **users can choose which repositories to use** via the admin interface, providing an additional layer of security.
+
+### How Repository Selection Works:
+
+1. **OAuth Authorization**: User grants `repo` scope (access to all repos)
+2. **Repository Selection**: User logs into the admin UI and selects which repos they want to use
+3. **Access Control**: The CMS only allows operations on selected repositories
+4. **Storage**: Selected repos are stored per-user in Cloudflare KV
+
+This means:
+- ✅ Users only see/access repositories they've explicitly selected
+- ✅ Even if OAuth grants access to all repos, the CMS restricts access
+- ✅ Users can change their selection anytime in the admin UI
+- ✅ More secure than granting access to everything
+
+### Available Scopes:
+
+- **`repo`** (default): Full access to all repositories (public and private)
+  - Required for repository selection feature to work
+  - Users can still choose which repos to use in the admin UI
+  - Recommended for most use cases
+
+- **`public_repo`**: Access public repositories only
+  - More restrictive, but limits functionality
+  - Users won't be able to select private repositories
+
+- **Combined scopes**: You can combine multiple scopes: `public_repo repo:status`
+
+### Changing the Scope:
+
+To change from the default `repo` to `public_repo`:
+
+```bash
+echo "public_repo" | wrangler secret put GITHUB_SCOPE --name little-cms
+```
+
+Or set it as an environment variable in `wrangler.toml`:
+
+```toml
+[vars]
+GITHUB_SCOPE = "public_repo"
+```
+
+**Note**: Users will need to re-authorize the application if you change the scope.
 

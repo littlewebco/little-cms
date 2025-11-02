@@ -11,12 +11,28 @@ interface Env {
   APP_URL?: string;
 }
 
+/**
+ * Get selected repositories for a user (helper function)
+ */
+async function getSelectedRepos(sessions: KVNamespace | undefined, userId: number): Promise<string[]> {
+  if (!sessions) return [];
+  
+  const data = await sessions.get(`selected_repos_${userId}`);
+  if (!data) return [];
+  
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
 export async function handleContentAPI(request: Request, env?: Env): Promise<Response> {
   const url = new URL(request.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
   
-  // Path format: /api/content/:repo/:path
-  if (pathParts.length < 3 || pathParts[0] !== 'api' || pathParts[1] !== 'content') {
+  // Path format: /api/content/:owner/:repo/:path or /api/content/:owner/:repo?path=...
+  if (pathParts.length < 4 || pathParts[0] !== 'api' || pathParts[1] !== 'content') {
     return new Response('Invalid API path', { status: 400 });
   }
 
@@ -32,11 +48,19 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
     );
   }
 
-  const repoName = pathParts[2];
-  const filePath = pathParts.slice(3).join('/') || '';
+  const owner = pathParts[2];
+  const repo = pathParts[3];
+  // Decode the file path (it may be URL encoded)
+  const filePath = decodeURIComponent(pathParts.slice(4).join('/')) || '';
+  
+  if (!owner || !repo) {
+    return new Response('Invalid repository name', { status: 400 });
+  }
+
+  const repoFullName = `${owner}/${repo}`;
   
   // Validate file path (prevent path traversal)
-  if (filePath.includes('..') || filePath.includes('~') || filePath.startsWith('/')) {
+  if (filePath && (filePath.includes('..') || filePath.includes('~') || filePath.startsWith('/'))) {
     return new Response(
       JSON.stringify({ error: 'Invalid path' }),
       {
@@ -45,15 +69,25 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
       }
     );
   }
+  const envVars = env as Env || {};
+  const sessions = envVars.SESSIONS;
+  
+  // Check if repository is selected (if user has selected repos)
+  const selectedRepos = await getSelectedRepos(sessions, auth.user.id);
+  if (selectedRepos.length > 0 && !selectedRepos.includes(repoFullName)) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Repository not selected',
+        message: 'Please select this repository in your settings to access it.'
+      }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
   
   const github = new GitHubAPI(auth.token);
-
-  // Parse repo config from request or config
-  // TODO: Load from little-cms.config.js
-  const [owner, repo] = repoName.split('/');
-  if (!owner || !repo) {
-    return new Response('Invalid repository name', { status: 400 });
-  }
 
   try {
     switch (request.method) {
@@ -65,8 +99,10 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
             headers: { 'Content-Type': 'application/json' },
           });
         } else {
-          // List directory
-          const files = await github.getDirectory(owner, repo, '.');
+          // List directory - check for path query parameter
+          const pathParam = url.searchParams.get('path');
+          const directoryPath = pathParam || '.';
+          const files = await github.getDirectory(owner, repo, directoryPath);
           return new Response(JSON.stringify(files), {
             headers: { 'Content-Type': 'application/json' },
           });

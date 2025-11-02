@@ -7,17 +7,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
-  root: path.resolve(__dirname, 'src/admin'),
+  root: __dirname,
   build: {
-    outDir: path.resolve(__dirname, 'dist/admin'),
+    outDir: path.resolve(__dirname, '../../dist/admin'),
     emptyOutDir: true,
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src/admin/src'),
+      '@': path.resolve(__dirname, 'src'),
     },
   },
   server: {
     port: 3001,
   },
 });
+

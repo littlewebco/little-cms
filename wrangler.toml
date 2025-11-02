@@ -30,4 +30,4 @@ preview_id = "e4695b3c5f9741c9b2f7f75d26f32fe6"
 
 # Static assets configuration for admin UI
 [assets]
-directory = "./dist/admin"
+bucket = "./dist/admin"

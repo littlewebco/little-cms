@@ -3,7 +3,7 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
+# package-lock.json - Keep this for CI/CD reproducibility
 PRD
 
 # Cloudflare Wrangler
@@ -35,4 +35,16 @@ Thumbs.db
 .idea
 .vscode/
 *.sublime-project
-*.sublime-workspace
+*.sublime-workspace 
+
+# Build outputs
+dist/
+node_modules/
+
+# Config files (keep templates)
+# Note: wrangler.toml is NOT ignored - needed for GitHub Actions deployment
+little-cms.config.js
+
+# GitHub Actions artifacts
+*.zip
+*.tar.gz

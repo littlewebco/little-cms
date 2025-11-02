@@ -1,14 +1,22 @@
-name: Build and Deploy
+name: Build and Deploy LittleCMS
 
 on:
   push:
     branches:
       - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
     
     steps:
       - name: Checkout code
@@ -29,11 +37,39 @@ jobs:
       - name: Build admin UI
         run: npm run build:admin || echo "Admin UI build skipped"
 
-      - name: Set Cloudflare Account ID
-        run: |
-          if [ -n "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
-            sed -i "s/account_id = \".*\"/account_id = \"${{ secrets.CLOUDFLARE_ACCOUNT_ID }}\"/" wrangler.toml
-          fi
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: write
+      deployments: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build worker
+        run: npm run build:worker
+
+      - name: Build admin UI
+        run: npm run build:admin || echo "Admin UI build skipped"
 
       - name: Install Wrangler CLI
         run: npm install -g wrangler
@@ -43,21 +79,36 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: .
+          workingDirectory: '.'
+          command: deploy
+        env:
+          WRANGLER_SEND_METRICS: false
 
       - name: Set Worker Secrets
-        if: success()
         run: |
           if [ -n "${{ secrets.GITHUB_CLIENT_ID }}" ]; then
-            echo "${{ secrets.GITHUB_CLIENT_ID }}" | wrangler secret put GITHUB_CLIENT_ID
+            echo "${{ secrets.GITHUB_CLIENT_ID }}" | wrangler secret put GITHUB_CLIENT_ID --name little-cms
           fi
           if [ -n "${{ secrets.GITHUB_CLIENT_SECRET }}" ]; then
-            echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | wrangler secret put GITHUB_CLIENT_SECRET
+            echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | wrangler secret put GITHUB_CLIENT_SECRET --name little-cms
           fi
           if [ -n "${{ secrets.APP_URL }}" ]; then
-            echo "${{ secrets.APP_URL }}" | wrangler secret put APP_URL
+            echo "${{ secrets.APP_URL }}" | wrangler secret put APP_URL --name little-cms
           fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_SEND_METRICS: false
 
+      - name: Create deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              environment: 'production',
+              auto_merge: false,
+              required_contexts: []
+            })

@@ -728,6 +728,12 @@
   });
   async function handleRequest(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/assets/")) {
+      const envTyped = env;
+      if (envTyped?.ASSETS) {
+        return envTyped.ASSETS.fetch(request);
+      }
+    }
     if (url.pathname === "/" && url.searchParams.has("githubUrl")) {
       return handleEmbed(request);
     }

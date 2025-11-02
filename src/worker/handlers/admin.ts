@@ -20,8 +20,9 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
   // Serve index.html for root path
   if (path === '/' || path === '/index.html') {
     // Serve the actual built index.html
-    // Note: Assets are served from /assets/ (not /admin/assets/) because
-    // [site] bucket serves from the bucket root, so /assets/file.js maps to dist/admin/assets/file.js
+    // Note: Assets are served from /assets/ (not /admin/assets/) 
+    // The main worker handles /assets/* requests using the ASSETS binding
+    // which maps ./dist/admin/assets/* to /assets/*
     return new Response(
       `<!DOCTYPE html>
 <html lang="en">
@@ -44,8 +45,7 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
     );
   }
   
-  // Assets are served automatically by Cloudflare's [site] bucket configuration
-  // Requests to /assets/* are handled before reaching the worker
+  // Assets are handled by the main worker's ASSETS binding
   // No need to handle them here
   
   return new Response('Not Found', { status: 404 });

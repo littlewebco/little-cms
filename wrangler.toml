@@ -29,5 +29,5 @@ preview_id = "e4695b3c5f9741c9b2f7f75d26f32fe6"
 # upload.format = "modules"
 
 # Static assets configuration for admin UI
-[site]
-bucket = "./dist/admin"
+[assets]
+directory = "./dist/admin"

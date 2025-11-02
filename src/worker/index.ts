@@ -16,6 +16,15 @@ addEventListener('fetch', (event: FetchEvent) => {
 async function handleRequest(request: Request, env?: unknown): Promise<Response> {
   const url = new URL(request.url);
   
+  // Handle static assets first (CSS, JS, images, etc.)
+  // With [assets] configuration, we use the ASSETS binding
+  if (url.pathname.startsWith('/assets/')) {
+    const envTyped = env as { ASSETS?: { fetch: (req: Request) => Promise<Response> } };
+    if (envTyped?.ASSETS) {
+      return envTyped.ASSETS.fetch(request);
+    }
+  }
+  
   // Handle embed requests (original GitShow functionality)
   if (url.pathname === '/' && url.searchParams.has('githubUrl')) {
     return handleEmbed(request);

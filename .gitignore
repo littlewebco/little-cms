@@ -48,3 +48,7 @@ little-cms.config.js
 # GitHub Actions artifacts
 *.zip
 *.tar.gz
+env.local
+env.production
+env.development
+env

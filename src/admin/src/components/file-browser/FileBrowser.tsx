@@ -239,6 +239,25 @@ ${body}`;
     setShowNewPostDialog(true);
   };
 
+  const handleCreateFolder = () => {
+    const folderName = prompt('Enter folder name:');
+    if (!folderName) return;
+    
+    // GitHub doesn't support empty directories, so we create a .gitkeep file
+    const folderPath = currentPath === 'posts' 
+      ? `posts/${folderName}/.gitkeep`
+      : `${currentPath}/${folderName}/.gitkeep`;
+    
+    const message = prompt('Enter commit message:', `Create folder ${folderName}`);
+    if (!message) return;
+
+    createFileMutation.mutate({
+      path: folderPath,
+      content: '# This file keeps the directory in Git\n',
+      message,
+    });
+  };
+
   const handleCreatePost = (data: {
     title: string;
     date: string;

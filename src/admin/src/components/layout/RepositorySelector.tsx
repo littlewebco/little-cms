@@ -33,6 +33,13 @@ export default function RepositorySelector() {
     retry: 1,
   });
 
+  // Check if user has installations (must be called before any conditional returns)
+  const { data: installationsData } = useQuery({
+    queryKey: ['repos', 'installations'],
+    queryFn: () => api.repos.installations(),
+    retry: 1,
+  });
+
   // Update selected repos when data loads
   useEffect(() => {
     if (selectedData?.repos) {
@@ -65,6 +72,9 @@ export default function RepositorySelector() {
     saveMutation.mutate(selectedRepos);
   };
 
+  const repos = data?.repos || [];
+  const hasInstallations = (installationsData?.installations?.length || 0) > 0;
+
   if (isLoading) {
     return (
       <Card>
@@ -90,14 +100,35 @@ export default function RepositorySelector() {
     );
   }
 
-  const repos = data?.repos || [];
+  if (!hasInstallations && repos.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Select Repositories</CardTitle>
+          <CardDescription>
+            Choose which repositories LittleCMS can access.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-8">
+            <p className="text-muted-foreground mb-4">
+              No repositories found. Please install the GitHub App first to grant access to your repositories.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Install the GitHub App using the "GitHub App Installation" section above.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Select Repositories</CardTitle>
         <CardDescription>
-          Choose which repositories LittleCMS can access. Even though the OAuth token grants access to all repos,
+          Choose which repositories LittleCMS can access. Even though the GitHub App installation grants access to all repos,
           only selected repositories will be accessible through the CMS.
         </CardDescription>
       </CardHeader>
@@ -105,7 +136,12 @@ export default function RepositorySelector() {
         <div className="space-y-4">
           <div className="max-h-96 overflow-y-auto border rounded-lg p-4 space-y-2">
             {repos.length === 0 ? (
-              <p className="text-muted-foreground">No repositories found.</p>
+              <div className="text-center py-8">
+                <p className="text-muted-foreground mb-2">No repositories found.</p>
+                <p className="text-sm text-muted-foreground">
+                  The GitHub App may not have access to any repositories yet, or you may need to update the installation.
+                </p>
+              </div>
             ) : (
               repos.map((repo) => (
                 <label

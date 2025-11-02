@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Github } from 'lucide-react';
 
 interface SetupStep {
   id: string;
@@ -133,6 +134,7 @@ export default function SetupWizard() {
           <CardContent>
             <div className="space-y-4">
               <Button onClick={handleGitHubOAuthSetup} variant="outline">
+                <Github className="w-4 h-4 mr-2" />
                 Create GitHub OAuth App
               </Button>
               <div className="grid grid-cols-2 gap-4">

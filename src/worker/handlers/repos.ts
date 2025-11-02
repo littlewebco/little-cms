@@ -153,9 +153,9 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
         const body = await request.json();
         const { repos, installationId } = body; // Array of repo full_names and installation ID
 
-        if (!Array.isArray(repos) || !installationId) {
+        if (!Array.isArray(repos)) {
           return new Response(
-            JSON.stringify({ error: 'Invalid request body. Expected { repos: string[], installationId: string }' }),
+            JSON.stringify({ error: 'Invalid request body. Expected { repos: string[], installationId?: string }' }),
             {
               status: 400,
               headers: { 'Content-Type': 'application/json' },
@@ -163,11 +163,30 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
           );
         }
 
-        // Update installation info with selected repos
-        const installationInfo = await getInstallationInfo(sessions, installationId);
-        if (installationInfo) {
-          const githubApp = await import('../utils/github-app.js');
-          await githubApp.storeInstallation(sessions, installationId, auth.user.login, repos);
+        // Get user's installations
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
+
+        if (userInstallations.length === 0) {
+          return new Response(
+            JSON.stringify({ error: 'No installations found. Please install the GitHub App first.' }),
+            {
+              status: 400,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        // If installationId is provided, update only that installation
+        // Otherwise, update all installations with the selected repos
+        const installationsToUpdate = installationId 
+          ? [installationId]
+          : userInstallations;
+
+        for (const instId of installationsToUpdate) {
+          const installationInfo = await getInstallationInfo(sessions, instId);
+          if (installationInfo) {
+            await storeInstallation(sessions, instId, auth.user.login, repos);
+          }
         }
 
         return new Response(
@@ -220,6 +239,63 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
           }
         );
       }
+    }
+
+    case 'installations': {
+      // Get installation status for authenticated user
+      try {
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
+        const installationsList = [];
+
+        for (const installationId of userInstallations) {
+          try {
+            const installation = await getInstallation(appId, privateKey, installationId);
+            const installationInfo = await getInstallationInfo(sessions, installationId);
+            const repos = await getInstallationRepos(appId, privateKey, installationId);
+
+            installationsList.push({
+              id: installation.id,
+              account: installation.account,
+              repository_selection: installation.repository_selection,
+              repos_count: repos.length,
+              selected_repos_count: installationInfo?.repos?.length || 0,
+            });
+          } catch (error) {
+            console.error(`Error fetching installation ${installationId}:`, error);
+            // Continue with other installations
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ installations: installationsList }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (error) {
+        const err = error as Error;
+        return new Response(
+          JSON.stringify({ error: err.message }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    case 'install-url': {
+      // Get GitHub App installation URL for the authenticated user
+      // This allows users to install/update the app
+      const returnUrl = url.searchParams.get('return_url') || '/admin/settings';
+      const installUrl = `https://github.com/apps/littlecms/installations/new?state=${encodeURIComponent(returnUrl)}`;
+      
+      return new Response(
+        JSON.stringify({ url: installUrl }),
+        {
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     default:

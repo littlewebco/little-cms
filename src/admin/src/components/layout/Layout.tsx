@@ -1,8 +1,10 @@
 import { ReactNode } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth, useLogout } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Moon, Sun, Github } from 'lucide-react';
+import Sidebar from './Sidebar';
 
 interface LayoutProps {
   children?: ReactNode;
@@ -12,85 +14,85 @@ export default function Layout({ children }: LayoutProps) {
   const { user, isAuthenticated } = useAuth();
   const logout = useLogout();
   const location = useLocation();
+  const { resolvedTheme, toggleTheme } = useTheme();
 
-  const isActive = (path: string) => {
-    if (path === '/admin') {
-      return location.pathname === '/admin' || location.pathname === '/admin/';
-    }
-    return location.pathname.startsWith(path);
-  };
+  // Don't show sidebar on login/setup pages
+  const showSidebar = isAuthenticated && !location.pathname.includes('/setup') && !location.pathname.includes('/login');
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-6">
-              <Link to="/admin" className="text-2xl font-bold hover:opacity-80 transition-opacity">
-                LittleCMS
-              </Link>
-              {isAuthenticated && user && (
-                <nav className="flex items-center gap-2">
-                  <Link
-                    to="/admin"
-                    className={cn(
-                      'px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                      isActive('/admin') && location.pathname !== '/admin/settings'
-                        ? 'bg-muted text-foreground'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    Dashboard
-                  </Link>
-                  <Link
-                    to="/admin/settings"
-                    className={cn(
-                      'px-3 py-2 rounded-md text-sm font-medium transition-colors',
-                      isActive('/admin/settings')
-                        ? 'bg-muted text-foreground'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    )}
-                  >
-                    Settings
-                  </Link>
-                </nav>
-              )}
-            </div>
-            <nav className="flex items-center gap-4">
-              {isAuthenticated && user && (
-                <>
-                  <span className="text-sm text-muted-foreground">
-                    {user.name || user.login}
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => logout.mutate()}
-                  >
-                    Logout
-                  </Button>
-                </>
-              )}
-              {!isAuthenticated && (
+    <div className="min-h-screen bg-background flex">
+      {showSidebar && <Sidebar />}
+      
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <header className="border-b bg-background sticky top-0 z-10">
+          <div className="px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {!showSidebar && (
+                  <a href="/admin" className="text-2xl font-bold hover:opacity-80 transition-opacity">
+                    <span className="font-blackecho">Little</span><span>CMS</span>
+                  </a>
+                )}
+              </div>
+              <div className="flex items-center gap-4">
+                {/* Theme Toggle */}
                 <Button
-                  variant="default"
+                  variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    // Redirect to GitHub App installation page
-                    window.location.href = 'https://github.com/apps/littlecms/installations/new';
-                  }}
+                  onClick={toggleTheme}
+                  className="h-9 w-9 p-0"
+                  aria-label="Toggle theme"
                 >
-                  Install GitHub App
+                  {resolvedTheme === 'dark' ? (
+                    <Sun className="h-4 w-4" />
+                  ) : (
+                    <Moon className="h-4 w-4" />
+                  )}
                 </Button>
-              )}
-            </nav>
+                
+                {isAuthenticated && user && (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className="text-sm font-medium">{user.name || user.login}</div>
+                        <div className="text-xs text-muted-foreground">Admin</div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => logout.mutate()}
+                      >
+                        Logout
+                      </Button>
+                    </div>
+                  </>
+                )}
+                {!isAuthenticated && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => {
+                      window.location.href = 'https://github.com/apps/littlecms/installations/new';
+                    }}
+                  >
+                    <Github className="w-4 h-4 mr-2" />
+                    Install GitHub App
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-      </header>
-      <main className="container mx-auto px-4 py-8">
-        <Outlet />
-        {children}
-      </main>
+        </header>
+
+        {/* Main Content */}
+        <main className="flex-1 overflow-auto">
+          <div className="p-6">
+            <Outlet />
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

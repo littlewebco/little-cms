@@ -80,15 +80,30 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
 
   const repoFullName = `${owner}/${repo}`;
   
-  // Validate file path (prevent path traversal)
-  if (filePath && (filePath.includes('..') || filePath.includes('~') || filePath.startsWith('/'))) {
-    return new Response(
-      JSON.stringify({ error: 'Invalid path' }),
-      {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+  // Validate file path (prevent path traversal and ensure within /posts)
+  if (filePath) {
+    // Prevent path traversal
+    if (filePath.includes('..') || filePath.includes('~') || filePath.startsWith('/')) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid path' }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    
+    // Ensure all paths are within /posts directory
+    const normalizedPath = filePath.startsWith('./') ? filePath.slice(2) : filePath;
+    if (normalizedPath !== 'posts' && !normalizedPath.startsWith('posts/')) {
+      return new Response(
+        JSON.stringify({ error: 'Path must be within /posts directory' }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
   }
   
   const envVars = env as Env || {};
@@ -151,8 +166,21 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
           });
         } else {
           // List directory - check for path query parameter
+          // Default to 'posts' directory if no path specified
           const pathParam = url.searchParams.get('path');
-          const directoryPath = pathParam || '.';
+          const directoryPath = pathParam || 'posts';
+          
+          // Ensure directory path is within /posts
+          if (directoryPath !== 'posts' && !directoryPath.startsWith('posts/')) {
+            return new Response(
+              JSON.stringify({ error: 'Directory must be within /posts' }),
+              {
+                status: 403,
+                headers: { 'Content-Type': 'application/json' },
+              }
+            );
+          }
+          
           const files = await github.getDirectory(owner, repo, directoryPath);
           return new Response(JSON.stringify(files), {
             headers: { 'Content-Type': 'application/json' },
@@ -167,6 +195,17 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
         
         if (!content || !message) {
           return new Response('Missing content or message', { status: 400 });
+        }
+
+        // Ensure file path is within /posts
+        if (filePath !== 'posts' && !filePath.startsWith('posts/')) {
+          return new Response(
+            JSON.stringify({ error: 'Files must be created within /posts directory' }),
+            {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
         }
 
         let sha: string | undefined;
@@ -187,6 +226,17 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
 
       case 'DELETE': {
         // Delete file
+        // Ensure file path is within /posts
+        if (filePath !== 'posts' && !filePath.startsWith('posts/')) {
+          return new Response(
+            JSON.stringify({ error: 'Files must be deleted from within /posts directory' }),
+            {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
         const file = await github.getFile(owner, repo, filePath);
         const body = await request.json();
         const { message } = body;

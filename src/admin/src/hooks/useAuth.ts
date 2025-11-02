@@ -9,15 +9,36 @@ export function useAuth() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['auth', 'session'],
     queryFn: async () => {
-      // Try session endpoint first (more efficient)
-      const session = await api.auth.session();
-      if (session.authenticated && session.user) {
-        return { user: session.user };
+      try {
+        // Try session endpoint first (more efficient)
+        const session = await api.auth.session();
+        if (session.authenticated && session.user) {
+          return { user: session.user };
+        }
+        // Session not authenticated, try me endpoint
+        try {
+          return await api.auth.me();
+        } catch {
+          // Not authenticated
+          return null;
+        }
+      } catch (err: any) {
+        // Session endpoint failed, try me endpoint
+        if (err?.status === 401) {
+          // Not authenticated, return null
+          return null;
+        }
+        // Other error, try me endpoint
+        try {
+          return await api.auth.me();
+        } catch {
+          return null;
+        }
       }
-      // Fallback to me endpoint
-      return api.auth.me();
     },
     retry: false,
+    // Don't throw errors - just return null for 401
+    throwOnError: false,
   });
 
   return {

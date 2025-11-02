@@ -15,9 +15,17 @@ export async function apiRequest<T>(
       'Content-Type': 'application/json',
       ...options?.headers,
     },
+    credentials: 'include', // Include cookies for session
   });
 
   if (!response.ok) {
+    // For 401 errors, return a more specific error that can be handled gracefully
+    if (response.status === 401) {
+      const errorText = await response.text();
+      const error = new Error(errorText || 'Unauthorized');
+      (error as any).status = 401;
+      throw error;
+    }
     const error = await response.text();
     throw new Error(error || `API request failed: ${response.statusText}`);
   }
@@ -50,11 +58,22 @@ export const api = {
       default_branch: string;
       selected: boolean;
     }> }>('/repos/list'),
-    select: (repos: string[]) => apiRequest<{ success: boolean; repos: string[] }>('/repos/select', {
+    select: (repos: string[], installationId?: string) => apiRequest<{ success: boolean; repos: string[] }>('/repos/select', {
       method: 'POST',
-      body: JSON.stringify({ repos }),
+      body: JSON.stringify({ repos, installationId }),
     }),
     selected: () => apiRequest<{ repos: string[] }>('/repos/selected'),
+    installations: () => apiRequest<{ installations: Array<{
+      id: number;
+      account: { login: string; type: string };
+      repository_selection: string;
+      repos_count: number;
+      selected_repos_count: number;
+    }> }>('/repos/installations'),
+    installUrl: (returnUrl?: string) => {
+      const url = `/repos/install-url${returnUrl ? `?return_url=${encodeURIComponent(returnUrl)}` : ''}`;
+      return apiRequest<{ url: string }>(url);
+    },
   },
 
   // Preview endpoints

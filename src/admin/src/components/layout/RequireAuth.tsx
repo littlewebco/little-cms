@@ -1,20 +1,11 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import LoginPage from './LoginPage';
 
 /**
  * Protected route wrapper
  */
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      // Redirect to GitHub App installation page
-      window.location.href = 'https://github.com/apps/littlecms/installations/new';
-    }
-  }, [isAuthenticated, isLoading, navigate]);
 
   if (isLoading) {
     return (
@@ -25,7 +16,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return null;
+    return <LoginPage />;
   }
 
   return <>{children}</>;

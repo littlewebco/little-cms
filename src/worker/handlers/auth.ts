@@ -7,11 +7,14 @@ import {
   getInstallation, 
   getInstallationRepos, 
   storeInstallation, 
-  getUserInstallations,
-  listInstallations
+  getUserInstallations
 } from '../utils/github-app.js';
 
 interface Env {
+  // GitHub OAuth (for user authentication)
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  // GitHub App (for repository access)
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   SESSIONS?: KVNamespace;
@@ -72,12 +75,53 @@ async function getSession(sessions: KVNamespace, sessionId: string): Promise<Ses
 }
 
 /**
- * Get GitHub user info using installation token
+ * Exchange OAuth code for access token
  */
-async function getGitHubUser(token: string): Promise<GitHubUser> {
+async function exchangeCodeForToken(
+  code: string,
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<string> {
+  const response = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': 'LittleCMS',
+    },
+    body: JSON.stringify({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to exchange code: ${response.status} ${error}`);
+  }
+
+  const data = await response.json() as { access_token?: string; error?: string; error_description?: string };
+  if (data.error) {
+    throw new Error(`OAuth error: ${data.error_description || data.error}`);
+  }
+
+  if (!data.access_token) {
+    throw new Error('No access token received from GitHub');
+  }
+
+  return data.access_token;
+}
+
+/**
+ * Get GitHub user info using OAuth token
+ */
+async function getGitHubUserFromOAuth(token: string): Promise<GitHubUser> {
   const response = await fetch('https://api.github.com/user', {
     headers: {
-      'Authorization': `token ${token}`,
+      'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github.v3+json',
       'User-Agent': 'LittleCMS',
     },
@@ -88,7 +132,39 @@ async function getGitHubUser(token: string): Promise<GitHubUser> {
     throw new Error(`Failed to get user: ${response.status} ${error}`);
   }
 
-  return response.json();
+  const userData = await response.json() as {
+    login: string;
+    id: number;
+    avatar_url?: string;
+    name?: string;
+  };
+  
+  // Get user email (requires user:email scope)
+  let email = '';
+  try {
+    const emailResponse = await fetch('https://api.github.com/user/emails', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'LittleCMS',
+      },
+    });
+    if (emailResponse.ok) {
+      const emails = await emailResponse.json() as Array<{ email: string; primary: boolean }>;
+      const primaryEmail = emails.find((e) => e.primary);
+      email = primaryEmail?.email || emails[0]?.email || '';
+    }
+  } catch {
+    // Email fetch failed, continue without it
+  }
+
+  return {
+    login: userData.login,
+    id: userData.id,
+    avatar_url: userData.avatar_url || '',
+    name: userData.name || userData.login,
+    email,
+  };
 }
 
 /**
@@ -131,14 +207,17 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
 
   const action = pathParts[2];
   const envVars = env as Env || {};
+  const clientId = envVars.GITHUB_CLIENT_ID || '';
+  const clientSecret = envVars.GITHUB_CLIENT_SECRET || '';
   const appId = envVars.GITHUB_APP_ID || '';
   const privateKey = envVars.GITHUB_APP_PRIVATE_KEY || '';
   const sessions = envVars.SESSIONS;
   const appUrl = envVars.APP_URL || url.origin;
 
-  if (!appId || !privateKey) {
+  // OAuth is required for authentication
+  if (!clientId || !clientSecret) {
     return new Response(
-      JSON.stringify({ error: 'GitHub App not configured' }),
+      JSON.stringify({ error: 'GitHub OAuth not configured. Please set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' }),
       {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -148,23 +227,57 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
 
   switch (action) {
     case 'login': {
-      // Redirect to GitHub App installation page with state parameter
-      // The state will be used to redirect back after installation
+      // Redirect to GitHub OAuth with minimal scope (read:user for identity only)
       const state = generateSessionId();
       const returnUrl = url.searchParams.get('return_url') || '/admin';
+      const redirectUri = `${url.origin}/api/auth/callback`;
       
-      // Store return URL temporarily (1 hour)
+      // Store return URL temporarily (10 minutes)
       if (sessions) {
-        await sessions.put(`install_return_${state}`, returnUrl, { expirationTtl: 3600 });
+        await sessions.put(`oauth_state_${state}`, returnUrl, { expirationTtl: 600 });
       }
       
-      // Redirect to GitHub App installation with state
-      const installUrl = `https://github.com/apps/littlecms/installations/new?state=${encodeURIComponent(state)}`;
-      return Response.redirect(installUrl, 302);
+      // OAuth URL with public_repo scope for public repos, GitHub App handles private repos
+      const oauthUrl = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user%20user:email%20public_repo&state=${encodeURIComponent(state)}`;
+      return Response.redirect(oauthUrl, 302);
     }
 
     case 'link': {
-      // Link an existing installation (for users who already installed the app)
+      // SECURITY FIX: Link an installation only if user already has a session
+      // This prevents unauthorized linking of installations
+      if (!sessions) {
+        return new Response(
+          JSON.stringify({ error: 'Sessions not configured' }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Check if user already has a session
+      const existingSessionId = getSessionFromCookie(request);
+      if (!existingSessionId) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized. Please install the GitHub App first.' }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const existingSession = await getSession(sessions, existingSessionId);
+      if (!existingSession) {
+        return new Response(
+          JSON.stringify({ error: 'Session expired. Please install the GitHub App again.' }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
       // Accepts installation_id as query parameter or in body
       let installationId: string | null = null;
       
@@ -195,35 +308,40 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
         const repos = await getInstallationRepos(appId, privateKey, installationId);
         const repoFullNames = repos.map(r => r.full_name);
 
-        // Create user from installation account
-        const user: GitHubUser = {
-          login: installation.account.login,
-          id: 0,
-          avatar_url: '',
-          name: installation.account.login,
-          email: '',
-        };
+        // Verify installation belongs to the same user as the session
+        if (installation.account.login !== existingSession.user.login) {
+          return new Response(
+            JSON.stringify({ error: 'Installation does not belong to your account' }),
+            {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
 
-        // Create session
-        const sessionId = generateSessionId();
-        const session: Session = {
-          user,
-          expiresAt: Date.now() + (3600 * 24 * 7 * 1000),
-          installations: [installationId],
+        // Update session to include this installation
+        const updatedInstallations = [...existingSession.installations];
+        if (!updatedInstallations.includes(installationId)) {
+          updatedInstallations.push(installationId);
+        }
+
+        const updatedSession: Session = {
+          ...existingSession,
+          installations: updatedInstallations,
         };
 
         if (sessions) {
-          await storeInstallation(sessions, installationId, user.login, repoFullNames);
-          await storeSession(sessions, sessionId, session);
+          await storeInstallation(sessions, installationId, existingSession.user.login, repoFullNames);
+          await storeSession(sessions, existingSessionId, updatedSession);
         }
 
         // If this is a GET request, redirect to admin
         if (request.method === 'GET') {
+          const redirectUrl = `${url.origin}/admin`;
           return new Response(null, {
             status: 302,
             headers: {
-              'Location': `${appUrl}/admin`,
-              'Set-Cookie': createSessionCookie(sessionId),
+              'Location': redirectUrl,
             },
           });
         }
@@ -232,7 +350,7 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
         return new Response(
           JSON.stringify({ 
             success: true, 
-            user,
+            user: existingSession.user,
             installation: {
               id: installation.id,
               account: installation.account,
@@ -243,7 +361,6 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
             status: 200,
             headers: {
               'Content-Type': 'application/json',
-              'Set-Cookie': createSessionCookie(sessionId),
             },
           }
         );
@@ -260,19 +377,75 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
     }
 
     case 'installations': {
-      // List all installations for the app (for users to find their installation ID)
+      // SECURITY FIX: Require authentication and only return user's installations
+      // This prevents unauthorized access to installation information
+      if (!sessions) {
+        return new Response(
+          JSON.stringify({ error: 'Sessions not configured' }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Check if user is authenticated
+      const sessionId = getSessionFromCookie(request);
+      if (!sessionId) {
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized', installations: [] }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const session = await getSession(sessions, sessionId);
+      if (!session) {
+        return new Response(
+          JSON.stringify({ error: 'Session expired', installations: [] }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Only return installations linked to this user's session
+      const userInstallations = await getUserInstallations(sessions, session.user.login);
+      
+      if (userInstallations.length === 0) {
+        return new Response(
+          JSON.stringify({ installations: [] }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Get installation details for user's installations only
       try {
-        const installations = await listInstallations(appId, privateKey);
-        
-        // Return installations with basic info
-        const installationsList = installations.map(inst => ({
-          id: inst.id,
-          account: inst.account,
-          repository_selection: inst.repository_selection,
-        }));
+        const installationsList = await Promise.all(
+          userInstallations.map(async (installationId) => {
+            try {
+              const installation = await getInstallation(appId, privateKey, installationId);
+              return {
+                id: installation.id,
+                account: installation.account,
+                repository_selection: installation.repository_selection,
+              };
+            } catch {
+              // Skip invalid installations
+              return null;
+            }
+          })
+        );
 
         return new Response(
-          JSON.stringify({ installations: installationsList }),
+          JSON.stringify({ 
+            installations: installationsList.filter(inst => inst !== null) 
+          }),
           {
             headers: { 'Content-Type': 'application/json' },
           }
@@ -280,7 +453,7 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
       } catch (error) {
         const err = error as Error;
         return new Response(
-          JSON.stringify({ error: err.message }),
+          JSON.stringify({ error: err.message, installations: [] }),
           {
             status: 500,
             headers: { 'Content-Type': 'application/json' },
@@ -290,132 +463,180 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
     }
 
     case 'callback': {
-      // Handle GitHub App installation callback
       const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
       const installationId = url.searchParams.get('installation_id');
       const setupAction = url.searchParams.get('setup_action');
 
-      if (!installationId) {
-        return new Response('Missing installation_id parameter', { status: 400 });
-      }
-
-      try {
-        // Get installation info to verify it exists
-        const installation = await getInstallation(appId, privateKey, installationId);
-        
-        // Get repositories accessible to this installation
-        const repos = await getInstallationRepos(appId, privateKey, installationId);
-        const repoFullNames = repos.map(r => r.full_name);
-
-        // If setup_action is 'install', store the installation and create a session
-        if (setupAction === 'install') {
-          // Check if there's a return URL from state parameter
-          const state = url.searchParams.get('state');
-          let returnUrl = '/admin';
-          if (state && sessions) {
-            const storedReturnUrl = await sessions.get(`install_return_${state}`);
-            if (storedReturnUrl) {
-              // Normalize return URL - ensure it's a path, not a full URL
-              const parsedReturnUrl = new URL(storedReturnUrl, 'http://dummy');
-              returnUrl = parsedReturnUrl.pathname || '/admin';
-              await sessions.delete(`install_return_${state}`);
-            }
-          }
-          
-          // Ensure returnUrl starts with /
-          if (!returnUrl.startsWith('/')) {
-            returnUrl = '/' + returnUrl;
-          }
-          
-          // Create a session for the user who installed the app
-          // Use installation account info to identify the user
-          const sessionId = generateSessionId();
-          
-          // Create a user object from installation account
-          // Note: For organization installations, account.type will be 'Organization'
-          const user: GitHubUser = {
-            login: installation.account.login,
-            id: 0, // We don't have user ID from installation, using 0 as placeholder
-            avatar_url: '', // Not available from installation
-            name: installation.account.login,
-            email: '',
-          };
-
-          // Create session with this installation
-          const session: Session = {
-            user,
-            expiresAt: Date.now() + (3600 * 24 * 7 * 1000), // 7 days
-            installations: [installationId],
-          };
-
-          if (sessions) {
-            // Store installation info using account login as identifier
-            await storeInstallation(sessions, installationId, user.login, repoFullNames);
-            
-            // Store session
-            await storeSession(sessions, sessionId, session);
-          }
-
-          // Redirect to admin with session cookie
-          return new Response(null, {
-            status: 302,
-            headers: {
-              'Location': `${appUrl}${returnUrl}`,
-              'Set-Cookie': createSessionCookie(sessionId),
-            },
-          });
+      // Handle GitHub App installation callback FIRST (it may include OAuth code + state)
+      // Priority: installation_id takes precedence over OAuth callback
+      if (installationId) {
+        if (!sessions) {
+          return new Response('Sessions not configured', { status: 500 });
         }
 
-        // If code is provided but setup_action is not 'install', handle as update
-        // This happens when installation is updated (e.g., repositories added/removed)
-        if (!setupAction) {
+        // Verify user is authenticated
+        const sessionId = getSessionFromCookie(request);
+        if (!sessionId) {
+          // Redirect to OAuth login, preserving the installation callback URL
+          const returnUrl = encodeURIComponent(url.pathname + url.search);
+          return Response.redirect(`${url.origin}/api/auth/login?return_url=${returnUrl}`, 302);
+        }
+
+        const session = await getSession(sessions, sessionId);
+        if (!session) {
+          // Session expired, redirect to login
+          const returnUrl = encodeURIComponent(url.pathname + url.search);
+          return Response.redirect(`${url.origin}/api/auth/login?return_url=${returnUrl}`, 302);
+        }
+
+        // Verify GitHub App is configured
+        if (!appId || !privateKey) {
+          return new Response(
+            JSON.stringify({ error: 'GitHub App not configured' }),
+            {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        try {
           // Get installation info
           const installation = await getInstallation(appId, privateKey, installationId);
+          
+          // Verify installation belongs to the authenticated user
+          // For personal accounts: check if login matches
+          // For organizations: GitHub already ensures only authorized users can install,
+          // so we trust the installation callback (user must have permission)
+          if (installation.account.type === 'User' && installation.account.login !== session.user.login) {
+            return new Response(
+              JSON.stringify({ error: 'Installation does not belong to your account' }),
+              {
+                status: 403,
+                headers: { 'Content-Type': 'application/json' },
+              }
+            );
+          }
+          
+          // For organizations, we trust GitHub's authorization - if the user received
+          // this callback, they have permission to install on that organization
+          
+          // Get repositories accessible to this installation
           const repos = await getInstallationRepos(appId, privateKey, installationId);
           const repoFullNames = repos.map(r => r.full_name);
 
-          // Create user from installation account
-          const user: GitHubUser = {
-            login: installation.account.login,
-            id: 0,
-            avatar_url: '',
-            name: installation.account.login,
-            email: '',
-          };
-
-          // Find existing session or create new one
-          const sessionId = generateSessionId();
-          const session: Session = {
-            user,
-            expiresAt: Date.now() + (3600 * 24 * 7 * 1000),
-            installations: [installationId],
-          };
-
-          if (sessions) {
-            await storeInstallation(sessions, installationId, user.login, repoFullNames);
-            await storeSession(sessions, sessionId, session);
+          // Update session to include this installation
+          const updatedInstallations = [...session.installations];
+          if (!updatedInstallations.includes(installationId)) {
+            updatedInstallations.push(installationId);
           }
 
+          const updatedSession: Session = {
+            ...session,
+            installations: updatedInstallations,
+          };
+
+          // Store installation info with the user's login (for lookup)
+          // Also store the account (org/user) that owns the installation
+          await storeInstallation(sessions, installationId, session.user.login, repoFullNames);
+          await storeSession(sessions, sessionId, updatedSession);
+
+          // Check if there's a return URL in the state parameter (from install-url)
+          // GitHub App installations may include state in query params
+          let redirectPath = '/admin';
+          
+          if (state) {
+            // Decode and use the return URL from state
+            try {
+              const decodedState = decodeURIComponent(state);
+              // If state looks like a path (starts with /), use it
+              if (decodedState.startsWith('/')) {
+                redirectPath = decodedState;
+              }
+            } catch {
+              // If decoding fails, use default
+            }
+          }
+
+          // Redirect to admin (or return URL from state)
           return new Response(null, {
             status: 302,
             headers: {
-              'Location': `${appUrl}/admin`,
+              'Location': `${url.origin}${redirectPath}`,
+            },
+          });
+        } catch (error) {
+          const err = error as Error;
+          return new Response(
+            JSON.stringify({ error: `GitHub App installation failed: ${err.message}` }),
+            {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+      }
+
+      // Handle OAuth callback (user authentication)
+      // Only process if there's no installation_id (to avoid conflicts)
+      if (code && state) {
+        if (!sessions) {
+          return new Response('Sessions not configured', { status: 500 });
+        }
+
+        // Verify state - check if it's a valid OAuth state (stored in KV)
+        const storedReturnUrl = await sessions.get(`oauth_state_${state}`);
+        if (!storedReturnUrl) {
+          // State not found in KV - this might be from GitHub App installation
+          // If we have installation_id, we already handled it above
+          // Otherwise, it's an invalid/expired state
+          return new Response('Invalid or expired state parameter', { status: 400 });
+        }
+
+        try {
+          const redirectUri = `${url.origin}/api/auth/callback`;
+          
+          // Exchange code for token
+          const oauthToken = await exchangeCodeForToken(code, clientId, clientSecret, redirectUri);
+          
+          // Get user info from OAuth token
+          const user = await getGitHubUserFromOAuth(oauthToken);
+
+          // Create session with authenticated user
+          const sessionId = generateSessionId();
+          const session: Session = {
+            user,
+            expiresAt: Date.now() + (3600 * 24 * 7 * 1000), // 7 days
+            installations: [], // Will be populated when GitHub App is installed
+          };
+
+          await storeSession(sessions, sessionId, session);
+          await sessions.delete(`oauth_state_${state}`);
+
+          // Redirect to admin (or return URL)
+          const returnUrl = storedReturnUrl || '/admin';
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': `${url.origin}${returnUrl}`,
               'Set-Cookie': createSessionCookie(sessionId),
             },
           });
+        } catch (error) {
+          const err = error as Error;
+          return new Response(
+            JSON.stringify({ error: `OAuth authentication failed: ${err.message}` }),
+            {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
         }
-
-        return new Response('Invalid callback parameters', { status: 400 });
-      } catch (error) {
-        const err = error as Error;
-        return new Response(
-          JSON.stringify({ error: err.message }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
-        );
       }
+
+      // Neither OAuth code nor installation_id provided
+      return new Response('Missing required parameters (code or installation_id)', { status: 400 });
     }
 
     case 'user': {

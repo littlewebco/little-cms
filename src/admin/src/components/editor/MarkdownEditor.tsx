@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Save, Eye, Code } from 'lucide-react';
+import { Save, Eye, Code, Trash2 } from 'lucide-react';
 
 interface GitHubFile {
   name: string;
@@ -148,12 +148,40 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
     },
   });
 
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (message: string) => {
+      return api.content.delete(repo, file.path, message);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['content', repo] });
+      alert('File deleted successfully!');
+      if (onClose) {
+        onClose();
+      }
+    },
+    onError: (error) => {
+      alert(`Error deleting file: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    },
+  });
+
   const handleSave = () => {
     const message = prompt('Enter commit message:', `Update ${file.name}`);
     if (!message) return;
 
     const content = serializeFrontMatter(frontMatter, body);
     saveMutation.mutate({ content, message });
+  };
+
+  const handleDelete = () => {
+    if (!confirm(`Are you sure you want to delete "${file.name}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    const message = prompt('Enter commit message:', `Delete ${file.name}`);
+    if (!message) return;
+
+    deleteMutation.mutate(message);
   };
 
   const handleFrontMatterChange = (key: string, value: string | number | boolean) => {
@@ -185,7 +213,7 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
         <div className="flex items-center gap-2">
           <span className="font-medium">{file.name}</span>
           {hasChanges && (
-            <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 rounded">
+            <span className="text-xs px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded">
               Unsaved changes
             </span>
           )}
@@ -214,6 +242,15 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
           >
             <Save className="w-4 h-4 mr-2" />
             {saveMutation.isPending ? 'Saving...' : 'Save'}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={handleDelete}
+            disabled={deleteMutation.isPending}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
           </Button>
           {onClose && (
             <Button variant="outline" size="sm" onClick={onClose}>
@@ -251,7 +288,7 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
                         handleFrontMatterChange(key, newValue);
                       }
                     }}
-                    className="w-full px-2 py-1 text-sm border rounded bg-background"
+                    className="w-full px-2 py-1 text-sm border rounded bg-background text-foreground border-input"
                   />
                 </div>
               ))}
@@ -278,7 +315,7 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              className="flex-1 w-full p-4 font-mono text-sm border-0 resize-none focus:outline-none"
+              className="flex-1 w-full p-4 font-mono text-sm border-0 resize-none focus:outline-none bg-background text-foreground placeholder:text-muted-foreground"
               placeholder="Start writing markdown..."
             />
           </div>

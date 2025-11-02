@@ -1,26 +1,81 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { getAllMarkdownFiles, type MarkdownFile } from '@/lib/utils';
+import { getAllMarkdownFiles, type MarkdownFile, getFileFrontMatter } from '@/lib/utils';
 import Modal from '@/components/ui/modal';
 import MarkdownEditor from '@/components/editor/MarkdownEditor';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileTextIcon, ListIcon, GridIcon } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { 
+  FileTextIcon, 
+  Plus, 
+  Search, 
+  FolderIcon, 
+  CalendarIcon,
+  TrendingUp,
+  FileEdit,
+  Layers
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-type ViewMode = 'list' | 'card';
+interface PostWithMetadata extends MarkdownFile {
+  title?: string;
+  date?: string;
+  category?: string;
+  excerpt?: string;
+  feature_image?: string;
+  frontMatter?: Record<string, any>;
+}
 
 interface RepoGroup {
   repo: string;
-  files: MarkdownFile[];
+  files: PostWithMetadata[];
+}
+
+// Parse front matter from markdown file name/path and fetch front matter
+async function parsePostMetadata(file: MarkdownFile): Promise<PostWithMetadata> {
+  const category = file.path.includes('/') 
+    ? file.path.split('/').slice(0, -1).pop() || 'uncategorized'
+    : 'uncategorized';
+  
+  // Extract date from filename if it follows pattern: YYYY-MM-DD-title.md
+  const dateMatch = file.name.match(/^(\d{4}-\d{2}-\d{2})-/);
+  const date = dateMatch ? dateMatch[1] : undefined;
+  
+  // Extract title from filename
+  const titleFromName = file.name
+    .replace(/\.md$/, '')
+    .replace(/\.markdown$/, '')
+    .replace(/^\d{4}-\d{2}-\d{2}-/, '')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, l => l.toUpperCase());
+
+  // Fetch front matter to get feature_image and other metadata
+  const frontMatter = await getFileFrontMatter(file.repo, file.path);
+  
+  // Use title from front matter if available, otherwise use filename
+  const title = frontMatter.title || frontMatter.Title || titleFromName;
+  const feature_image = frontMatter.feature_image || frontMatter.featureImage || frontMatter.FeatureImage;
+  const excerpt = frontMatter.excerpt || frontMatter.Excerpt || frontMatter.description || frontMatter.Description;
+
+  return {
+    ...file,
+    title,
+    date: frontMatter.date || frontMatter.Date || date,
+    category: frontMatter.category || frontMatter.Category || (category !== 'posts' ? category : 'uncategorized'),
+    excerpt,
+    feature_image,
+    frontMatter,
+  };
 }
 
 export default function Dashboard() {
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ file: MarkdownFile; repo: string } | null>(null);
   const [repoGroups, setRepoGroups] = useState<RepoGroup[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // Fetch selected repositories
   const { data: selectedReposData, isLoading: reposLoading } = useQuery({
@@ -45,8 +100,9 @@ export default function Dashboard() {
       for (const repo of selectedRepos) {
         try {
           const files = await getAllMarkdownFiles(repo);
-          if (files.length > 0) {
-            groups.push({ repo, files });
+          const filesWithMetadata = await Promise.all(files.map(parsePostMetadata));
+          if (filesWithMetadata.length > 0) {
+            groups.push({ repo, files: filesWithMetadata });
           }
         } catch (error) {
           console.error(`Error fetching files for ${repo}:`, error);
@@ -60,19 +116,66 @@ export default function Dashboard() {
     fetchAllFiles();
   }, [selectedRepos]);
 
-  // Load view mode preference from localStorage
-  useEffect(() => {
-    const savedViewMode = localStorage.getItem('dashboardViewMode') as ViewMode;
-    if (savedViewMode === 'list' || savedViewMode === 'card') {
-      setViewMode(savedViewMode);
-    }
-  }, []);
+  // Get all posts across all repos
+  const allPosts = useMemo(() => {
+    return repoGroups.flatMap(group => 
+      group.files.map(file => ({ ...file, repo: group.repo }))
+    );
+  }, [repoGroups]);
 
-  // Save view mode preference
-  const handleViewModeChange = (mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem('dashboardViewMode', mode);
-  };
+  // Get categories
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    allPosts.forEach(post => {
+      if (post.category) {
+        cats.add(post.category);
+      }
+    });
+    return Array.from(cats).sort();
+  }, [allPosts]);
+
+  // Filter posts by search and category
+  const filteredPosts = useMemo(() => {
+    let filtered = allPosts;
+
+    if (selectedCategory) {
+      filtered = filtered.filter(post => post.category === selectedCategory);
+    }
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(post => 
+        post.name.toLowerCase().includes(query) ||
+        post.title?.toLowerCase().includes(query) ||
+        post.path.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [allPosts, searchQuery, selectedCategory]);
+
+  // Get recent posts (last 10)
+  const recentPosts = useMemo(() => {
+    return [...allPosts]
+      .sort((a, b) => {
+        // Sort by date if available, otherwise by name
+        if (a.date && b.date) {
+          return b.date.localeCompare(a.date);
+        }
+        return b.name.localeCompare(a.name);
+      })
+      .slice(0, 10);
+  }, [allPosts]);
+
+  // Stats
+  const stats = useMemo(() => {
+    return {
+      totalPosts: allPosts.length,
+      totalRepos: selectedRepos.length,
+      totalCategories: categories.length,
+      recentActivity: recentPosts.length,
+    };
+  }, [allPosts, selectedRepos, categories, recentPosts]);
 
   const handleFileClick = (file: MarkdownFile, repo: string) => {
     setSelectedFile({ file, repo });
@@ -82,11 +185,16 @@ export default function Dashboard() {
     setSelectedFile(null);
   };
 
+  const handleCreatePost = () => {
+    // Navigate to content page to create new post
+    window.location.href = '/admin/content';
+  };
+
   if (reposLoading || filesLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-muted-foreground">
-          {reposLoading ? 'Loading repositories...' : 'Loading markdown files...'}
+          {reposLoading ? 'Loading repositories...' : 'Loading posts...'}
         </div>
       </div>
     );
@@ -95,9 +203,9 @@ export default function Dashboard() {
   if (selectedRepos.length === 0) {
     return (
       <div className="text-center py-12">
-        <h2 className="text-3xl font-bold mb-4">No Repositories Selected</h2>
+        <h2 className="text-3xl font-bold mb-4">Welcome to LittleCMS</h2>
         <p className="text-muted-foreground mb-6">
-          Please select at least one repository in settings to start viewing content.
+          Get started by selecting repositories in settings.
         </p>
         <Link to="/admin/settings">
           <Button>Go to Settings</Button>
@@ -106,102 +214,257 @@ export default function Dashboard() {
     );
   }
 
-  if (repoGroups.length === 0 && !filesLoading) {
-    return (
-      <div className="text-center py-12">
-        <h2 className="text-3xl font-bold mb-4">No Markdown Files Found</h2>
-        <p className="text-muted-foreground">
-          No markdown files (.md, .markdown) were found in your selected repositories.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div>
-      {/* Header with view toggle */}
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-3xl font-bold">Dashboard</h2>
-        <div className="flex items-center gap-2">
-          <Button
-            variant={viewMode === 'list' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => handleViewModeChange('list')}
-          >
-            <ListIcon className="h-4 w-4 mr-2" />
-            List
-          </Button>
-          <Button
-            variant={viewMode === 'card' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => handleViewModeChange('card')}
-          >
-            <GridIcon className="h-4 w-4 mr-2" />
-            Cards
-          </Button>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold">Dashboard</h2>
+          <p className="text-muted-foreground mt-1">
+            Manage your content across {stats.totalRepos} {stats.totalRepos === 1 ? 'repository' : 'repositories'}
+          </p>
         </div>
+        <Button onClick={handleCreatePost} size="lg">
+          <Plus className="w-4 h-4 mr-2" />
+          New Post
+        </Button>
       </div>
 
-      {/* Content */}
-      {viewMode === 'list' ? (
-        <div className="space-y-8">
-          {repoGroups.map((group) => (
-            <div key={group.repo}>
-              <h3 className="text-xl font-semibold mb-4">{group.repo}</h3>
-              <div className="border rounded-lg divide-y">
-                {group.files.map((file) => (
-                  <button
-                    key={`${group.repo}-${file.path}`}
-                    onClick={() => handleFileClick(file, group.repo)}
-                    className="w-full p-4 hover:bg-muted flex items-center gap-3 text-left transition-colors"
-                  >
-                    <FileTextIcon className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{file.name}</div>
-                      <div className="text-sm text-muted-foreground truncate">{file.path}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
+      {/* Stats Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Posts</CardTitle>
+            <FileTextIcon className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalPosts}</div>
+            <p className="text-xs text-muted-foreground">
+              Across all repositories
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Repositories</CardTitle>
+            <Layers className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalRepos}</div>
+            <p className="text-xs text-muted-foreground">
+              Active repositories
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Categories</CardTitle>
+            <FolderIcon className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.totalCategories}</div>
+            <p className="text-xs text-muted-foreground">
+              Content categories
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.recentActivity}</div>
+            <p className="text-xs text-muted-foreground">
+              Recent posts
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Search and Filters */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search posts..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {repoGroups.map((group) => (
-            <Card key={group.repo} className="flex flex-col">
-              <CardHeader>
-                <CardTitle className="text-lg">{group.repo}</CardTitle>
-                <div className="text-sm text-muted-foreground">
-                  {group.files.length} file{group.files.length !== 1 ? 's' : ''}
-                </div>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <div className="space-y-2">
-                  {group.files.slice(0, 5).map((file) => (
-                    <button
-                      key={`${group.repo}-${file.path}`}
-                      onClick={() => handleFileClick(file, group.repo)}
-                      className="w-full p-3 hover:bg-muted rounded-md flex items-center gap-2 text-left transition-colors"
-                    >
-                      <FileTextIcon className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate">{file.name}</div>
-                        <div className="text-xs text-muted-foreground truncate">{file.path}</div>
-                      </div>
-                    </button>
-                  ))}
-                  {group.files.length > 5 && (
-                    <div className="text-sm text-muted-foreground pt-2">
-                      +{group.files.length - 5} more file{group.files.length - 5 !== 1 ? 's' : ''}
-                    </div>
+            <div className="flex gap-2 overflow-x-auto pb-2">
+              <Button
+                variant={selectedCategory === null ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSelectedCategory(null)}
+              >
+                All Categories
+              </Button>
+              {categories.map(category => (
+                <Button
+                  key={category}
+                  variant={selectedCategory === category ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedCategory(category)}
+                >
+                  {category}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Recent Posts */}
+      {recentPosts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Posts</CardTitle>
+            <CardDescription>Your most recently added or updated posts</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {recentPosts.slice(0, 5).map((post) => (
+                <button
+                  key={`${post.repo}-${post.path}`}
+                  onClick={() => handleFileClick(post, post.repo)}
+                  className="w-full p-3 hover:bg-muted rounded-lg flex items-center gap-3 text-left transition-colors"
+                >
+                  {post.feature_image ? (
+                    <div 
+                      className="w-12 h-12 rounded-lg flex-shrink-0 bg-cover bg-center border"
+                      style={{ backgroundImage: `url(${post.feature_image})` }}
+                    />
+                  ) : (
+                    <FileTextIcon className="w-5 h-5 text-purple-500 flex-shrink-0" />
                   )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{post.title || post.name}</div>
+                    <div className="text-sm text-muted-foreground flex items-center gap-2">
+                      <span className="truncate">{post.repo}</span>
+                      {post.category && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <FolderIcon className="w-3 h-3" />
+                            {post.category}
+                          </span>
+                        </>
+                      )}
+                      {post.date && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-1">
+                            <CalendarIcon className="w-3 h-3" />
+                            {post.date}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
+
+      {/* All Posts Grid */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-semibold">
+            {selectedCategory ? `${selectedCategory} Posts` : 'All Posts'}
+            {searchQuery && ` matching "${searchQuery}"`}
+          </h3>
+          <div className="text-sm text-muted-foreground">
+            {filteredPosts.length} {filteredPosts.length === 1 ? 'post' : 'posts'}
+          </div>
+        </div>
+
+        {filteredPosts.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <FileTextIcon className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              <p className="text-lg font-medium mb-2">No posts found</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                {searchQuery || selectedCategory
+                  ? 'Try adjusting your search or filter'
+                  : 'Get started by creating your first post'}
+              </p>
+              {!searchQuery && !selectedCategory && (
+                <Button onClick={handleCreatePost}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Post
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {filteredPosts.map((post) => (
+              <Card 
+                key={`${post.repo}-${post.path}`}
+                className="cursor-pointer hover:shadow-md transition-shadow overflow-hidden"
+                onClick={() => handleFileClick(post, post.repo)}
+              >
+                {post.feature_image && (
+                  <div 
+                    className="w-full h-48 bg-cover bg-center relative"
+                    style={{ backgroundImage: `url(${post.feature_image})` }}
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
+                  </div>
+                )}
+                <CardHeader className={post.feature_image ? 'pt-4' : ''}>
+                  <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="text-lg line-clamp-2 flex-1">
+                      {post.title || post.name.replace(/\.md$/, '')}
+                    </CardTitle>
+                    {!post.feature_image && (
+                      <FileTextIcon className="w-5 h-5 text-purple-500 flex-shrink-0" />
+                    )}
+                  </div>
+                  {post.excerpt && (
+                    <CardDescription className="line-clamp-2 mt-2">
+                      {post.excerpt}
+                    </CardDescription>
+                  )}
+                  {!post.excerpt && (
+                    <CardDescription className="line-clamp-2">
+                      {post.path}
+                    </CardDescription>
+                  )}
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    {post.category && (
+                      <div className="flex items-center gap-1">
+                        <FolderIcon className="w-4 h-4" />
+                        <span>{post.category}</span>
+                      </div>
+                    )}
+                    {post.date && (
+                      <div className="flex items-center gap-1">
+                        <CalendarIcon className="w-4 h-4" />
+                        <span>{post.date}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 text-xs text-muted-foreground truncate">
+                    {post.repo}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Modal Editor */}
       {selectedFile && (

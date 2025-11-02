@@ -1,0 +1,12 @@
+@font-face {
+    font-family: 'Black Echo';
+    src: url('./BlackEcho.ttf') format('truetype'),
+         url('./BlackEcho.woff') format('woff');
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+.font-blackecho {
+    font-family: 'Black Echo', sans-serif;
+} 

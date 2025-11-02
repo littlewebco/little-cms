@@ -86,6 +86,12 @@ jobs:
 
       - name: Set Worker Secrets
         run: |
+          if [ -n "${{ secrets.GITHUB_CLIENT_ID }}" ]; then
+            echo "${{ secrets.GITHUB_CLIENT_ID }}" | wrangler secret put GITHUB_CLIENT_ID --name little-cms
+          fi
+          if [ -n "${{ secrets.GITHUB_CLIENT_SECRET }}" ]; then
+            echo "${{ secrets.GITHUB_CLIENT_SECRET }}" | wrangler secret put GITHUB_CLIENT_SECRET --name little-cms
+          fi
           if [ -n "${{ secrets.GITHUB_APP_ID }}" ]; then
             echo "${{ secrets.GITHUB_APP_ID }}" | wrangler secret put GITHUB_APP_ID --name little-cms
           fi

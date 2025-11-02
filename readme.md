@@ -6,9 +6,10 @@ LittleCMS is a self-hostable, Git-powered content management system that allows 
 
 - **Git-powered**: All content stored in GitHub repositories
 - **Self-hostable**: Deploy to your own Cloudflare Workers account
+- **GitHub App Authentication**: Secure, installation-based access with granular permissions
 - **Automated CI/CD**: GitHub Actions for builds and deployments
 - **Embed Support**: Embed GitHub files directly in your HTML pages
-- **Admin UI**: Modern React-based admin interface (coming soon)
+- **Admin UI**: Modern React-based admin interface for content editing
 - **Multi-repo Support**: Manage content across multiple repositories
 - **TypeScript**: Fully typed for better developer experience
 
@@ -68,13 +69,13 @@ Go to your repository → **Settings** → **Secrets and variables** → **Actio
 
 - `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID
 - `CLOUDFLARE_API_TOKEN` - Cloudflare API token with Workers permissions
-- `GITHUB_CLIENT_ID` - GitHub OAuth app client ID
-- `GITHUB_CLIENT_SECRET` - GitHub OAuth app client secret
+- `GITHUB_APP_ID` - GitHub App ID (e.g., 2222851)
+- `GITHUB_APP_PRIVATE_KEY` - GitHub App private key (PEM format)
 - `APP_URL` - Your deployed URL (optional, defaults to request origin)
 
-The setup wizard will help you create the GitHub OAuth app and guide you through all steps!
+The setup wizard will help you configure the GitHub App and guide you through all steps!
 
-See [docs/GITHUB_SECRETS.md](./docs/GITHUB_SECRETS.md) for detailed setup instructions.
+See [docs/GITHUB_APP_SETUP.md](./docs/GITHUB_APP_SETUP.md) for detailed setup instructions.
 
 ### 3. Set Up KV Namespace
 
@@ -100,11 +101,13 @@ preview_id = "your-preview-namespace-id"
 
 Edit `little-cms.config.js` with your repository details (or use `npx little-cms init`):
 
+**Note**: Configuration is now handled via GitHub App installations. Users install the app on their repositories, and the CMS automatically detects and manages access to those repositories.
+
 ```javascript
 module.exports = {
   github: {
-    clientId: process.env.GITHUB_CLIENT_ID,
-    clientSecret: process.env.GITHUB_CLIENT_SECRET,
+    appId: process.env.GITHUB_APP_ID,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY,
   },
   cloudflare: {
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
@@ -144,6 +147,26 @@ npm run build
 npm run deploy
 ```
 
+## How It Works
+
+### Authentication Flow
+
+LittleCMS uses **GitHub App** authentication for secure, installation-based access:
+
+1. **Install GitHub App**: Users install the LittleCMS GitHub App on their repositories
+2. **Automatic Detection**: The CMS automatically detects installed repositories
+3. **Installation Tokens**: Each installation gets its own secure token (valid for 1 hour)
+4. **Content Management**: Users can browse and edit content in their installed repositories through the admin UI
+
+### Key Benefits
+
+- **Granular Permissions**: Only access repositories where the app is installed
+- **Per-Installation Access**: Each installation has its own token scope
+- **More Secure**: Installation tokens are shorter-lived and more limited than OAuth tokens
+- **Better for Organizations**: Installations can be scoped to specific repositories
+
+See [docs/GITHUB_APP_SETUP.md](./docs/GITHUB_APP_SETUP.md) for detailed setup instructions.
+
 ## Embed Usage
 
 Embed GitHub files directly in your HTML:
@@ -156,8 +179,8 @@ The content will appear where the script tag is placed.
 
 ## Documentation
 
+- [GitHub App Setup](./docs/GITHUB_APP_SETUP.md) - GitHub App configuration and setup
 - [GitHub Secrets Setup](./docs/GITHUB_SECRETS.md) - Configure secrets for CI/CD
-- [OAuth Setup](./docs/OAUTH_SETUP.md) - GitHub OAuth configuration
 - [Configuration Guide](./docs/configuration.md) - Detailed config options
 - [API Reference](./docs/api.md) - API endpoints
 - [Migration Guide](./MIGRATION.md) - Migrating from GitShow

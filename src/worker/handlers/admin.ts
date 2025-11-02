@@ -3,6 +3,8 @@
  */
 interface Env {
   SESSIONS?: KVNamespace;
+  __STATIC_CONTENT?: any; // For asset serving
+  __STATIC_CONTENT_MANIFEST?: any; // Asset manifest
 }
 
 export async function handleAdmin(request: Request, env?: Env): Promise<Response> {
@@ -15,9 +17,11 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
     return Response.redirect(`${url.origin}/api/auth/callback${url.search}`, 302);
   }
   
-  // For now, return a placeholder
-  // In production, this will serve the built admin UI from dist/admin
+  // Serve index.html for root path
   if (path === '/' || path === '/index.html') {
+    // Serve the actual built index.html
+    // Note: Assets are served from /assets/ (not /admin/assets/) because
+    // [site] bucket serves from the bucket root, so /assets/file.js maps to dist/admin/assets/file.js
     return new Response(
       `<!DOCTYPE html>
 <html lang="en">
@@ -25,10 +29,11 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
+    <script type="module" crossorigin src="/assets/index-ClJ6TX0_.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-H3luEsyq.css">
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/admin/assets/index.js"></script>
   </body>
 </html>`,
       {
@@ -39,8 +44,10 @@ export async function handleAdmin(request: Request, env?: Env): Promise<Response
     );
   }
   
-  // Serve static assets
-  // TODO: Implement proper static file serving from dist/admin
-  return new Response('Admin UI assets coming soon', { status: 501 });
+  // Assets are served automatically by Cloudflare's [site] bucket configuration
+  // Requests to /assets/* are handled before reaching the worker
+  // No need to handle them here
+  
+  return new Response('Not Found', { status: 404 });
 }
 

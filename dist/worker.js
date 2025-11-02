@@ -169,10 +169,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
+    <script type="module" crossorigin src="/assets/index-ClJ6TX0_.js"><\/script>
+    <link rel="stylesheet" crossorigin href="/assets/index-H3luEsyq.css">
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/admin/assets/index.js"><\/script>
   </body>
 </html>`,
         {
@@ -182,7 +183,7 @@
         }
       );
     }
-    return new Response("Admin UI assets coming soon", { status: 501 });
+    return new Response("Not Found", { status: 404 });
   }
 
   // src/worker/handlers/auth.ts

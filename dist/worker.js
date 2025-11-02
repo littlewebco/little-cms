@@ -524,8 +524,8 @@ var INDEX_HTML = `<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <script type="module" crossorigin src="/assets/index-DVD9OLhU.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-18xhJve-.css">
+    <script type="module" crossorigin src="/assets/index-DIrlNujT.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-83spOCk1.css">
   </head>
   <body>
     <div id="root"></div>

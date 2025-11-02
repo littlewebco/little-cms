@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { FileIcon, FolderIcon, FileTextIcon, Plus, FolderPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import NewPostDialog from '@/components/post/NewPostDialog';
 
 interface GitHubFile {
   name: string;
@@ -20,6 +21,7 @@ interface FileBrowserProps {
 
 export default function FileBrowser({ repo, onFileSelect }: FileBrowserProps) {
   const [currentPath, setCurrentPath] = useState('posts');
+  const [showNewPostDialog, setShowNewPostDialog] = useState(false);
   const queryClient = useQueryClient();
 
   const { data, isLoading, error } = useQuery({
@@ -63,35 +65,92 @@ export default function FileBrowser({ repo, onFileSelect }: FileBrowserProps) {
   };
 
   const handleCreateFile = () => {
-    const fileName = prompt('Enter file name (e.g., my-post.md):');
-    if (!fileName) return;
-    
-    // Ensure .md extension
-    const finalFileName = fileName.endsWith('.md') || fileName.endsWith('.markdown') 
-      ? fileName 
-      : `${fileName}.md`;
-    
+    setShowNewPostDialog(true);
+  };
+
+  const handleCreatePost = (data: {
+    title: string;
+    date: string;
+    slug: string;
+    category?: string;
+    excerpt?: string;
+    feature_image?: string;
+    tags?: string[];
+    filename: string;
+  }) => {
     const filePath = currentPath === 'posts' 
-      ? `posts/${finalFileName}`
-      : `${currentPath}/${finalFileName}`;
-    
-    const message = prompt('Enter commit message:', `Create ${finalFileName}`);
-    if (!message) return;
+      ? `posts/${data.filename}`
+      : `${currentPath}/${data.filename}`;
+
+    // Build front matter with all fields
+    const frontMatter: Record<string, any> = {
+      title: data.title,
+      date: data.date,
+    };
+
+    if (data.category) {
+      frontMatter.category = data.category;
+    }
+    if (data.excerpt) {
+      frontMatter.excerpt = data.excerpt;
+    }
+    if (data.feature_image) {
+      frontMatter.feature_image = data.feature_image;
+    }
+    if (data.tags && data.tags.length > 0) {
+      frontMatter.tags = data.tags;
+    }
+
+    // Format front matter as YAML
+    const frontMatterLines: string[] = [];
+    Object.entries(frontMatter).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        // Format arrays as YAML list
+        frontMatterLines.push(`${key}:`);
+        value.forEach(item => {
+          frontMatterLines.push(`  - ${item}`);
+        });
+      } else if (typeof value === 'string' && (value.includes(':') || value.includes("'") || value.includes('"'))) {
+        // Escape strings that need quotes
+        frontMatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+      } else {
+        frontMatterLines.push(`${key}: ${value}`);
+      }
+    });
+
+    const frontMatterString = frontMatterLines.join('\n');
 
     const defaultContent = `---
-title: ${fileName.replace('.md', '').replace(/-/g, ' ')}
-date: ${new Date().toISOString().split('T')[0]}
+${frontMatterString}
 ---
 
-# ${fileName.replace('.md', '').replace(/-/g, ' ')}
+# ${data.title}
 
-Start writing your content here...
+${data.excerpt || 'Start writing your content here...'}
 `;
+
+    const message = `Create post: ${data.title}`;
 
     createFileMutation.mutate({
       path: filePath,
       content: defaultContent,
       message,
+    }, {
+      onSuccess: () => {
+        // Open the newly created file in the editor
+        const newFile: GitHubFile = {
+          name: data.filename,
+          path: filePath,
+          sha: '', // Will be updated after creation
+          size: 0,
+          type: 'file',
+          download_url: null,
+        };
+        // Wait a bit for the file to be created, then select it
+        setTimeout(() => {
+          onFileSelect(newFile);
+        }, 500);
+      },
     });
   };
 
@@ -133,7 +192,14 @@ Start writing your content here...
   }
 
   return (
-    <div className="h-full flex flex-col border rounded-lg">
+    <>
+      <NewPostDialog
+        isOpen={showNewPostDialog}
+        onClose={() => setShowNewPostDialog(false)}
+        onCreate={handleCreatePost}
+        defaultPath={currentPath}
+      />
+      <div className="h-full flex flex-col border rounded-lg">
       {/* Header with actions */}
       <div className="p-3 border-b bg-muted/50">
         <div className="flex items-center justify-between mb-2">
@@ -223,6 +289,7 @@ Start writing your content here...
         )}
       </div>
     </div>
+    </>
   );
 }
 

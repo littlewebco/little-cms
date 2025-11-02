@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { getAllMarkdownFiles, type MarkdownFile, getFileFrontMatter } from '@/lib/utils';
 import Modal from '@/components/ui/modal';
 import MarkdownEditor from '@/components/editor/MarkdownEditor';
+import NewPostDialog from '@/components/post/NewPostDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -76,6 +77,8 @@ export default function Dashboard() {
   const [repoGroups, setRepoGroups] = useState<RepoGroup[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [showNewPostDialog, setShowNewPostDialog] = useState(false);
+  const queryClient = useQueryClient();
 
   // Fetch selected repositories
   const { data: selectedReposData, isLoading: reposLoading } = useQuery({
@@ -177,6 +180,21 @@ export default function Dashboard() {
     };
   }, [allPosts, selectedRepos, categories, recentPosts]);
 
+  const createFileMutation = useMutation({
+    mutationFn: async ({ repo, path, content, message }: { repo: string; path: string; content: string; message: string }) => {
+      return api.content.create(repo, path, content, message);
+    },
+    onSuccess: (_, variables) => {
+      // Invalidate queries to refresh the file list
+      queryClient.invalidateQueries({ queryKey: ['content', variables.repo] });
+      queryClient.invalidateQueries({ queryKey: ['repos', 'selected'] });
+      // Refetch files for this repo
+      setTimeout(() => {
+        window.location.reload(); // Reload to see the new file
+      }, 1000);
+    },
+  });
+
   const handleFileClick = (file: MarkdownFile, repo: string) => {
     setSelectedFile({ file, repo });
   };
@@ -186,8 +204,83 @@ export default function Dashboard() {
   };
 
   const handleCreatePost = () => {
-    // Navigate to content page to create new post
-    window.location.href = '/admin/content';
+    if (selectedRepos.length === 0) {
+      alert('Please select at least one repository in settings first.');
+      return;
+    }
+    setShowNewPostDialog(true);
+  };
+
+  const handlePostCreate = (data: {
+    title: string;
+    date: string;
+    slug: string;
+    category?: string;
+    excerpt?: string;
+    feature_image?: string;
+    tags?: string[];
+    filename: string;
+  }) => {
+    // Use the first selected repo, or allow user to select if multiple
+    const repo = selectedRepos[0];
+    
+    const filePath = `posts/${data.filename}`;
+
+    // Build front matter with all fields
+    const frontMatter: Record<string, any> = {
+      title: data.title,
+      date: data.date,
+    };
+
+    if (data.category) {
+      frontMatter.category = data.category;
+    }
+    if (data.excerpt) {
+      frontMatter.excerpt = data.excerpt;
+    }
+    if (data.feature_image) {
+      frontMatter.feature_image = data.feature_image;
+    }
+    if (data.tags && data.tags.length > 0) {
+      frontMatter.tags = data.tags;
+    }
+
+    // Format front matter as YAML
+    const frontMatterLines: string[] = [];
+    Object.entries(frontMatter).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        // Format arrays as YAML list
+        frontMatterLines.push(`${key}:`);
+        value.forEach(item => {
+          frontMatterLines.push(`  - ${item}`);
+        });
+      } else if (typeof value === 'string' && (value.includes(':') || value.includes("'") || value.includes('"'))) {
+        // Escape strings that need quotes
+        frontMatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+      } else {
+        frontMatterLines.push(`${key}: ${value}`);
+      }
+    });
+
+    const frontMatterString = frontMatterLines.join('\n');
+
+    const defaultContent = `---
+${frontMatterString}
+---
+
+# ${data.title}
+
+${data.excerpt || 'Start writing your content here...'}
+`;
+
+    const message = `Create post: ${data.title}`;
+
+    createFileMutation.mutate({
+      repo,
+      path: filePath,
+      content: defaultContent,
+      message,
+    });
   };
 
   if (reposLoading || filesLoading) {
@@ -215,7 +308,14 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      <NewPostDialog
+        isOpen={showNewPostDialog}
+        onClose={() => setShowNewPostDialog(false)}
+        onCreate={handlePostCreate}
+        defaultPath="posts"
+      />
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -487,5 +587,6 @@ export default function Dashboard() {
         </Modal>
       )}
     </div>
+    </>
   );
 }

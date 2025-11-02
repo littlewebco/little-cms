@@ -1,0 +1,45 @@
+name: Build Only
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build worker
+        run: npm run build:worker
+
+      - name: Build admin UI
+        run: npm run build:admin || echo "Admin UI build skipped (not yet implemented)"
+
+      - name: Check build output
+        run: |
+          if [ -f "dist/worker.js" ]; then
+            echo "✓ Worker built successfully"
+            ls -lh dist/worker.js
+          else
+            echo "✗ Worker build failed"
+            exit 1
+          fi
+

@@ -1,0 +1,44 @@
+# Source files (only include built dist)
+src/
+!src/**/*.d.ts
+
+# Development files
+.vscode/
+.idea/
+*.log
+.DS_Store
+
+# Config files (keep only necessary ones)
+*.config.js
+*.config.ts
+!tailwind.config.js
+tsconfig*.json
+
+# Test files
+test/
+tests/
+*.test.ts
+*.test.tsx
+*.spec.ts
+
+# Documentation (keep main docs)
+docs/
+*.md
+!README.md
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+.wrangler/
+dist/admin/
+
+# Templates (keep for users)
+templates/
+

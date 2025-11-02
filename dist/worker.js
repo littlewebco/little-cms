@@ -1,3 +1,166 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// src/worker/utils/github-app.ts
+var github_app_exports = {};
+__export(github_app_exports, {
+  generateAppJWT: () => generateAppJWT,
+  getInstallation: () => getInstallation,
+  getInstallationInfo: () => getInstallationInfo,
+  getInstallationRepos: () => getInstallationRepos,
+  getInstallationToken: () => getInstallationToken,
+  getUserInstallations: () => getUserInstallations,
+  storeInstallation: () => storeInstallation
+});
+async function generateAppJWT(appId, privateKey) {
+  let keyData = privateKey.replace(/-----BEGIN RSA PRIVATE KEY-----/g, "").replace(/-----END RSA PRIVATE KEY-----/g, "").replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, "");
+  const keyBytes = Uint8Array.from(atob(keyData), (c) => c.charCodeAt(0));
+  const isPKCS8 = privateKey.includes("BEGIN PRIVATE KEY");
+  let cryptoKey;
+  try {
+    if (isPKCS8) {
+      cryptoKey = await crypto.subtle.importKey(
+        "pkcs8",
+        keyBytes,
+        {
+          name: "RSASSA-PKCS1-v1_5",
+          hash: "SHA-256"
+        },
+        false,
+        ["sign"]
+      );
+    } else {
+      throw new Error("PKCS#1 format not directly supported. Please convert to PKCS#8 format or ensure your GitHub App key is in PKCS#8 format.");
+    }
+  } catch (error) {
+    throw new Error(`Failed to import private key: ${error instanceof Error ? error.message : "Unknown error"}. Ensure the key is in PKCS#8 format (BEGIN PRIVATE KEY).`);
+  }
+  const header = {
+    alg: "RS256",
+    typ: "JWT"
+  };
+  const now = Math.floor(Date.now() / 1e3);
+  const payload = {
+    iss: appId,
+    // Issuer (GitHub App ID)
+    iat: now,
+    // Issued at
+    exp: now + 600
+    // Expires in 10 minutes
+  };
+  const encodedHeader = btoa(JSON.stringify(header)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const encodedPayload = btoa(JSON.stringify(payload)).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const signatureInput = `${encodedHeader}.${encodedPayload}`;
+  const signatureBytes = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    new TextEncoder().encode(signatureInput)
+  );
+  const signature = btoa(String.fromCharCode(...new Uint8Array(signatureBytes))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+  return `${signatureInput}.${signature}`;
+}
+async function getInstallationToken(appId, privateKey, installationId) {
+  const jwt = await generateAppJWT(appId, privateKey);
+  const response = await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${jwt}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "LittleCMS"
+    }
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get installation token: ${response.status} ${error}`);
+  }
+  const data = await response.json();
+  return data.token;
+}
+async function getInstallation(appId, privateKey, installationId) {
+  const jwt = await generateAppJWT(appId, privateKey);
+  const response = await fetch(`https://api.github.com/app/installations/${installationId}`, {
+    headers: {
+      "Authorization": `Bearer ${jwt}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "LittleCMS"
+    }
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get installation: ${response.status} ${error}`);
+  }
+  return response.json();
+}
+async function getInstallationRepos(appId, privateKey, installationId) {
+  const jwt = await generateAppJWT(appId, privateKey);
+  const response = await fetch(`https://api.github.com/app/installations/${installationId}/repositories`, {
+    headers: {
+      "Authorization": `Bearer ${jwt}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "LittleCMS"
+    }
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get installation repositories: ${response.status} ${error}`);
+  }
+  const data = await response.json();
+  return data.repositories || [];
+}
+async function storeInstallation(sessions, installationId, userIdOrLogin, repos, ttl = 3600 * 24 * 365) {
+  await sessions.put(`installation_${installationId}`, JSON.stringify({ userIdOrLogin, repos }), {
+    expirationTtl: ttl
+  });
+  const userKey = typeof userIdOrLogin === "string" ? userIdOrLogin : `user_${userIdOrLogin}`;
+  const userInstallationsKey = `user_installations_${userKey}`;
+  const existingData = await sessions.get(userInstallationsKey);
+  let installations = [];
+  if (existingData) {
+    try {
+      installations = JSON.parse(existingData);
+    } catch {
+      installations = [];
+    }
+  }
+  if (!installations.includes(installationId)) {
+    installations.push(installationId);
+    await sessions.put(userInstallationsKey, JSON.stringify(installations), {
+      expirationTtl: ttl
+    });
+  }
+}
+async function getInstallationInfo(sessions, installationId) {
+  const data = await sessions.get(`installation_${installationId}`);
+  if (!data) return null;
+  try {
+    return JSON.parse(data);
+  } catch {
+    return null;
+  }
+}
+async function getUserInstallations(sessions, userKey) {
+  const key = typeof userKey === "string" ? userKey : `user_${userKey}`;
+  const data = await sessions.get(`user_installations_${key}`);
+  if (!data) return [];
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+var init_github_app = __esm({
+  "src/worker/utils/github-app.ts"() {
+    "use strict";
+  }
+});
+
 // src/worker/utils/html.ts
 function escapeHtml(unsafe) {
   if (typeof unsafe !== "string") return "";
@@ -225,41 +388,6 @@ async function getSession(sessions, sessionId) {
   }
   return session;
 }
-async function exchangeCodeForToken(code, clientId, clientSecret, redirectUri) {
-  const response = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json"
-    },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      redirect_uri: redirectUri
-    })
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token exchange failed: ${response.status} ${error}`);
-  }
-  const data = await response.json();
-  return data.access_token;
-}
-async function getGitHubUser(token) {
-  const response = await fetch("https://api.github.com/user", {
-    headers: {
-      "Authorization": `token ${token}`,
-      "Accept": "application/vnd.github.v3+json",
-      "User-Agent": "LittleCMS"
-    }
-  });
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to get user: ${response.status} ${error}`);
-  }
-  return response.json();
-}
 function getSessionFromCookie(request) {
   const cookieHeader = request.headers.get("Cookie");
   if (!cookieHeader) return null;
@@ -282,13 +410,13 @@ async function handleAuth(request, env) {
   }
   const action = pathParts[2];
   const envVars = env || {};
-  const clientId = envVars.GITHUB_CLIENT_ID || "";
-  const clientSecret = envVars.GITHUB_CLIENT_SECRET || "";
+  const appId = envVars.GITHUB_APP_ID || "";
+  const privateKey = envVars.GITHUB_APP_PRIVATE_KEY || "";
   const sessions = envVars.SESSIONS;
   const appUrl = envVars.APP_URL || url.origin;
-  if (!clientId || !clientSecret) {
+  if (!appId || !privateKey) {
     return new Response(
-      JSON.stringify({ error: "GitHub OAuth not configured" }),
+      JSON.stringify({ error: "GitHub App not configured" }),
       {
         status: 500,
         headers: { "Content-Type": "application/json" }
@@ -296,53 +424,77 @@ async function handleAuth(request, env) {
     );
   }
   switch (action) {
-    case "login": {
-      const redirectUri = `${appUrl}/admin/auth/callback`;
-      const state = generateSessionId();
-      const scope = envVars.GITHUB_SCOPE || "repo";
-      if (sessions) {
-        await sessions.put(`oauth_state_${state}`, "1", { expirationTtl: 3600 });
-      }
-      const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${encodeURIComponent(state)}`;
-      return Response.redirect(githubAuthUrl, 302);
-    }
     case "callback": {
       const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      if (!code) {
-        return new Response("Missing code parameter", { status: 400 });
-      }
-      if (!state) {
-        return new Response("Missing state parameter", { status: 400 });
-      }
-      if (sessions) {
-        const stateValid = await sessions.get(`oauth_state_${state}`);
-        if (!stateValid) {
-          return new Response("Invalid state parameter", { status: 400 });
-        }
-        await sessions.delete(`oauth_state_${state}`);
+      const installationId = url.searchParams.get("installation_id");
+      const setupAction = url.searchParams.get("setup_action");
+      if (!installationId) {
+        return new Response("Missing installation_id parameter", { status: 400 });
       }
       try {
-        const redirectUri = `${appUrl}/admin/auth/callback`;
-        const token = await exchangeCodeForToken(code, clientId, clientSecret, redirectUri);
-        const user = await getGitHubUser(token);
-        const sessionId = generateSessionId();
-        const session = {
-          token,
-          user,
-          expiresAt: Date.now() + 3600 * 24 * 7 * 1e3
-          // 7 days
-        };
-        if (sessions) {
-          await storeSession(sessions, sessionId, session);
-        }
-        return new Response(null, {
-          status: 302,
-          headers: {
-            "Location": "/admin",
-            "Set-Cookie": createSessionCookie(sessionId)
+        const githubApp = await import("./utils/github-app.js");
+        const installation = await githubApp.getInstallation(appId, privateKey, installationId);
+        const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+        const repoFullNames = repos.map((r) => r.full_name);
+        if (setupAction === "install") {
+          const sessionId = generateSessionId();
+          const user = {
+            login: installation.account.login,
+            id: 0,
+            // We don't have user ID from installation, using 0 as placeholder
+            avatar_url: "",
+            // Not available from installation
+            name: installation.account.login,
+            email: ""
+          };
+          const session = {
+            user,
+            expiresAt: Date.now() + 3600 * 24 * 7 * 1e3,
+            // 7 days
+            installations: [installationId]
+          };
+          if (sessions) {
+            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            await storeSession(sessions, sessionId, session);
           }
-        });
+          return new Response(null, {
+            status: 302,
+            headers: {
+              "Location": "/admin",
+              "Set-Cookie": createSessionCookie(sessionId)
+            }
+          });
+        }
+        if (!setupAction) {
+          const installation2 = await githubApp.getInstallation(appId, privateKey, installationId);
+          const repos2 = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+          const repoFullNames2 = repos2.map((r) => r.full_name);
+          const user = {
+            login: installation2.account.login,
+            id: 0,
+            avatar_url: "",
+            name: installation2.account.login,
+            email: ""
+          };
+          const sessionId = generateSessionId();
+          const session = {
+            user,
+            expiresAt: Date.now() + 3600 * 24 * 7 * 1e3,
+            installations: [installationId]
+          };
+          if (sessions) {
+            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames2);
+            await storeSession(sessions, sessionId, session);
+          }
+          return new Response(null, {
+            status: 302,
+            headers: {
+              "Location": "/admin",
+              "Set-Cookie": createSessionCookie(sessionId)
+            }
+          });
+        }
+        return new Response("Invalid callback parameters", { status: 400 });
       } catch (error) {
         const err = error;
         return new Response(
@@ -353,6 +505,12 @@ async function handleAuth(request, env) {
           }
         );
       }
+    }
+    case "user": {
+      return new Response("This endpoint is not used for GitHub App authentication", { status: 404 });
+    }
+    case "user-callback": {
+      return new Response("This endpoint is not used for GitHub App authentication", { status: 404 });
     }
     case "logout": {
       const sessionId = getSessionFromCookie(request);
@@ -444,7 +602,7 @@ async function getAuthenticatedUser(request, env) {
   if (!sessionId) return null;
   const session = await getSession(sessions, sessionId);
   if (!session) return null;
-  return { user: session.user, token: session.token };
+  return { user: session.user, installations: session.installations };
 }
 
 // src/worker/utils/github.ts
@@ -534,15 +692,26 @@ var GitHubAPI = class {
 };
 
 // src/worker/handlers/content.ts
-async function getSelectedRepos(sessions, userId) {
-  if (!sessions) return [];
-  const data = await sessions.get(`selected_repos_${userId}`);
-  if (!data) return [];
-  try {
-    return JSON.parse(data);
-  } catch {
-    return [];
+init_github_app();
+async function getTokenForRepo(repoFullName, userInstallations, env) {
+  const appId = env.GITHUB_APP_ID;
+  const privateKey = env.GITHUB_APP_PRIVATE_KEY;
+  const sessions = env.SESSIONS;
+  if (!appId || !privateKey || !sessions) {
+    return null;
   }
+  for (const installationId of userInstallations) {
+    try {
+      const installationInfo = await getInstallationInfo(sessions, installationId);
+      if (installationInfo && installationInfo.repos.includes(repoFullName)) {
+        const token = await getInstallationToken(appId, privateKey, installationId);
+        return { token, installationId };
+      }
+    } catch (error) {
+      console.error(`Error checking installation ${installationId}:`, error);
+    }
+  }
+  return null;
 }
 async function handleContentAPI(request, env) {
   const url = new URL(request.url);
@@ -578,12 +747,21 @@ async function handleContentAPI(request, env) {
   }
   const envVars = env || {};
   const sessions = envVars.SESSIONS;
-  const selectedRepos = await getSelectedRepos(sessions, auth.user.id);
-  if (selectedRepos.length > 0 && !selectedRepos.includes(repoFullName)) {
+  if (!sessions) {
+    return new Response(
+      JSON.stringify({ error: "Sessions not configured" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  }
+  const userInstallations = await getUserInstallations(sessions, auth.user.login);
+  if (userInstallations.length === 0) {
     return new Response(
       JSON.stringify({
-        error: "Repository not selected",
-        message: "Please select this repository in your settings to access it."
+        error: "No installations found",
+        message: "Please install the GitHub App on your repositories first."
       }),
       {
         status: 403,
@@ -591,7 +769,20 @@ async function handleContentAPI(request, env) {
       }
     );
   }
-  const github = new GitHubAPI(auth.token);
+  const tokenInfo = await getTokenForRepo(repoFullName, userInstallations, envVars);
+  if (!tokenInfo) {
+    return new Response(
+      JSON.stringify({
+        error: "Repository not accessible",
+        message: "This repository is not accessible through any of your GitHub App installations."
+      }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  }
+  const github = new GitHubAPI(tokenInfo.token);
   try {
     switch (request.method) {
       case "GET":
@@ -775,6 +966,7 @@ async function handleSetupAPI(request, env) {
 }
 
 // src/worker/handlers/repos.ts
+init_github_app();
 async function handleReposAPI(request, env) {
   const url = new URL(request.url);
   const pathParts = url.pathname.split("/").filter(Boolean);
@@ -794,24 +986,71 @@ async function handleReposAPI(request, env) {
   const action = pathParts[2];
   const envVars = env || {};
   const sessions = envVars.SESSIONS;
-  const github = new GitHubAPI(auth.token);
+  const appId = envVars.GITHUB_APP_ID;
+  const privateKey = envVars.GITHUB_APP_PRIVATE_KEY;
+  if (!sessions || !appId || !privateKey) {
+    return new Response(
+      JSON.stringify({ error: "GitHub App not configured" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+  }
   switch (action) {
     case "list": {
       try {
-        const repos = await github.apiRequest("/user/repos?per_page=100&sort=updated");
-        const selectedRepos = await getSelectedRepos2(sessions, auth.user.id);
-        const reposWithSelection = repos.map((repo) => ({
-          id: repo.id,
-          name: repo.name,
-          full_name: repo.full_name,
-          owner: repo.owner.login,
-          private: repo.private,
-          description: repo.description,
-          default_branch: repo.default_branch,
-          selected: selectedRepos.includes(repo.full_name)
-        }));
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
+        if (userInstallations.length === 0) {
+          return new Response(
+            JSON.stringify({ repos: [] }),
+            {
+              headers: { "Content-Type": "application/json" }
+            }
+          );
+        }
+        const allRepos = /* @__PURE__ */ new Map();
+        for (const installationId of userInstallations) {
+          try {
+            const repos = await getInstallationRepos(appId, privateKey, installationId);
+            const installationInfo = await getInstallationInfo(sessions, installationId);
+            const selectedRepos = installationInfo?.repos || [];
+            for (const repo of repos) {
+              if (!allRepos.has(repo.full_name)) {
+                allRepos.set(repo.full_name, {
+                  id: repo.id,
+                  name: repo.name,
+                  full_name: repo.full_name,
+                  owner: repo.full_name.split("/")[0],
+                  private: repo.private,
+                  description: null,
+                  // Installation API doesn't return description
+                  default_branch: repo.default_branch
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching repos for installation ${installationId}:`, error);
+          }
+        }
+        const reposList = await Promise.all(
+          Array.from(allRepos.values()).map(async (repo) => {
+            let selected = false;
+            for (const installationId of userInstallations) {
+              const installationInfo = await getInstallationInfo(sessions, installationId);
+              if (installationInfo && installationInfo.repos.includes(repo.full_name)) {
+                selected = true;
+                break;
+              }
+            }
+            return {
+              ...repo,
+              selected
+            };
+          })
+        );
         return new Response(
-          JSON.stringify({ repos: reposWithSelection }),
+          JSON.stringify({ repos: reposList }),
           {
             headers: { "Content-Type": "application/json" }
           }
@@ -833,23 +1072,20 @@ async function handleReposAPI(request, env) {
       }
       try {
         const body = await request.json();
-        const { repos } = body;
-        if (!Array.isArray(repos)) {
+        const { repos, installationId } = body;
+        if (!Array.isArray(repos) || !installationId) {
           return new Response(
-            JSON.stringify({ error: "Invalid request body" }),
+            JSON.stringify({ error: "Invalid request body. Expected { repos: string[], installationId: string }" }),
             {
               status: 400,
               headers: { "Content-Type": "application/json" }
             }
           );
         }
-        if (sessions) {
-          await sessions.put(
-            `selected_repos_${auth.user.id}`,
-            JSON.stringify(repos),
-            { expirationTtl: 3600 * 24 * 365 }
-            // 1 year
-          );
+        const installationInfo = await getInstallationInfo(sessions, installationId);
+        if (installationInfo) {
+          const githubApp = await Promise.resolve().then(() => (init_github_app(), github_app_exports));
+          await githubApp.storeInstallation(sessions, installationId, auth.user.login, repos);
         }
         return new Response(
           JSON.stringify({ success: true, repos }),
@@ -870,9 +1106,17 @@ async function handleReposAPI(request, env) {
     }
     case "selected": {
       try {
-        const selectedRepos = await getSelectedRepos2(sessions, auth.user.id);
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
+        const allSelectedRepos = [];
+        for (const installationId of userInstallations) {
+          const installationInfo = await getInstallationInfo(sessions, installationId);
+          if (installationInfo && installationInfo.repos) {
+            allSelectedRepos.push(...installationInfo.repos);
+          }
+        }
+        const uniqueRepos = Array.from(new Set(allSelectedRepos));
         return new Response(
-          JSON.stringify({ repos: selectedRepos }),
+          JSON.stringify({ repos: uniqueRepos }),
           {
             headers: { "Content-Type": "application/json" }
           }
@@ -890,16 +1134,6 @@ async function handleReposAPI(request, env) {
     }
     default:
       return new Response("Invalid action", { status: 400 });
-  }
-}
-async function getSelectedRepos2(sessions, userId) {
-  if (!sessions) return [];
-  const data = await sessions.get(`selected_repos_${userId}`);
-  if (!data) return [];
-  try {
-    return JSON.parse(data);
-  } catch {
-    return [];
   }
 }
 

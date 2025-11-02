@@ -11,11 +11,10 @@ import { handleReposAPI } from './handlers/repos.js';
 import { handlePreviewAPI } from './handlers/preview.js';
 
 interface Env {
-  GITHUB_CLIENT_ID?: string;
-  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   SESSIONS?: KVNamespace;
   APP_URL?: string;
-  GITHUB_SCOPE?: string; // Optional: GitHub OAuth scope (default: 'public_repo')
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 

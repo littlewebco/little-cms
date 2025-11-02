@@ -1,30 +1,51 @@
 /**
  * Content API handler for LittleCMS
+ * Uses GitHub App installation tokens for repository access
  */
 import { GitHubAPI } from '../utils/github.js';
 import { getAuthenticatedUser } from './auth.js';
+import { getInstallationToken, getInstallationInfo, getUserInstallations } from '../utils/github-app.js';
 
 interface Env {
   SESSIONS?: KVNamespace;
-  GITHUB_CLIENT_ID?: string;
-  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   APP_URL?: string;
 }
 
 /**
- * Get selected repositories for a user (helper function)
+ * Get installation token for a repository
+ * Finds which installation has access to the repo
  */
-async function getSelectedRepos(sessions: KVNamespace | undefined, userId: number): Promise<string[]> {
-  if (!sessions) return [];
-  
-  const data = await sessions.get(`selected_repos_${userId}`);
-  if (!data) return [];
-  
-  try {
-    return JSON.parse(data);
-  } catch {
-    return [];
+async function getTokenForRepo(
+  repoFullName: string,
+  userInstallations: string[],
+  env: Env
+): Promise<{ token: string; installationId: string } | null> {
+  const appId = env.GITHUB_APP_ID;
+  const privateKey = env.GITHUB_APP_PRIVATE_KEY;
+  const sessions = env.SESSIONS;
+
+  if (!appId || !privateKey || !sessions) {
+    return null;
   }
+
+  // Check each installation to see if it has access to this repo
+  for (const installationId of userInstallations) {
+    try {
+      const installationInfo = await getInstallationInfo(sessions, installationId);
+      if (installationInfo && installationInfo.repos.includes(repoFullName)) {
+        // This installation has access to the repo
+        const token = await getInstallationToken(appId, privateKey, installationId);
+        return { token, installationId };
+      }
+    } catch (error) {
+      // Continue to next installation
+      console.error(`Error checking installation ${installationId}:`, error);
+    }
+  }
+
+  return null;
 }
 
 export async function handleContentAPI(request: Request, env?: Env): Promise<Response> {
@@ -69,16 +90,30 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
       }
     );
   }
+  
   const envVars = env as Env || {};
   const sessions = envVars.SESSIONS;
   
-  // Check if repository is selected (if user has selected repos)
-  const selectedRepos = await getSelectedRepos(sessions, auth.user.id);
-  if (selectedRepos.length > 0 && !selectedRepos.includes(repoFullName)) {
+  if (!sessions) {
+    return new Response(
+      JSON.stringify({ error: 'Sessions not configured' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Get user's installations (using login as identifier)
+  const userInstallations = await getUserInstallations(sessions, auth.user.login);
+  
+  // If user has installations, check if repo is accessible via any installation
+  if (userInstallations.length === 0) {
+    // No installations - user needs to install the app
     return new Response(
       JSON.stringify({ 
-        error: 'Repository not selected',
-        message: 'Please select this repository in your settings to access it.'
+        error: 'No installations found',
+        message: 'Please install the GitHub App on your repositories first.'
       }),
       {
         status: 403,
@@ -86,8 +121,24 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
       }
     );
   }
+
+  const tokenInfo = await getTokenForRepo(repoFullName, userInstallations, envVars);
   
-  const github = new GitHubAPI(auth.token);
+  if (!tokenInfo) {
+    return new Response(
+      JSON.stringify({ 
+        error: 'Repository not accessible',
+        message: 'This repository is not accessible through any of your GitHub App installations.'
+      }),
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Use installation token for API calls
+  const github = new GitHubAPI(tokenInfo.token);
 
   try {
     switch (request.method) {
@@ -162,4 +213,3 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
     );
   }
 }
-

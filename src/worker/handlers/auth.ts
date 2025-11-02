@@ -1,20 +1,13 @@
 /**
  * Auth handler for LittleCMS
- * Handles GitHub OAuth flow with session management
+ * Handles GitHub App installation flow with session management
  */
 
 interface Env {
-  GITHUB_CLIENT_ID?: string;
-  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   SESSIONS?: KVNamespace;
   APP_URL?: string;
-  GITHUB_SCOPE?: string; // Optional: GitHub OAuth scope (default: 'public_repo')
-}
-
-interface GitHubTokenResponse {
-  access_token: string;
-  token_type: string;
-  scope: string;
 }
 
 interface GitHubUser {
@@ -26,9 +19,9 @@ interface GitHubUser {
 }
 
 interface Session {
-  token: string;
   user: GitHubUser;
   expiresAt: number;
+  installations: string[]; // Installation IDs this user has access to
 }
 
 /**
@@ -71,39 +64,7 @@ async function getSession(sessions: KVNamespace, sessionId: string): Promise<Ses
 }
 
 /**
- * Exchange OAuth code for access token
- */
-async function exchangeCodeForToken(
-  code: string,
-  clientId: string,
-  clientSecret: string,
-  redirectUri: string
-): Promise<string> {
-  const response = await fetch('https://github.com/login/oauth/access_token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      redirect_uri: redirectUri,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token exchange failed: ${response.status} ${error}`);
-  }
-
-  const data: GitHubTokenResponse = await response.json();
-  return data.access_token;
-}
-
-/**
- * Get GitHub user info
+ * Get GitHub user info using installation token
  */
 async function getGitHubUser(token: string): Promise<GitHubUser> {
   const response = await fetch('https://api.github.com/user', {
@@ -162,14 +123,14 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
 
   const action = pathParts[2];
   const envVars = env as Env || {};
-  const clientId = envVars.GITHUB_CLIENT_ID || '';
-  const clientSecret = envVars.GITHUB_CLIENT_SECRET || '';
+  const appId = envVars.GITHUB_APP_ID || '';
+  const privateKey = envVars.GITHUB_APP_PRIVATE_KEY || '';
   const sessions = envVars.SESSIONS;
   const appUrl = envVars.APP_URL || url.origin;
 
-  if (!clientId || !clientSecret) {
+  if (!appId || !privateKey) {
     return new Response(
-      JSON.stringify({ error: 'GitHub OAuth not configured' }),
+      JSON.stringify({ error: 'GitHub App not configured' }),
       {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -178,82 +139,108 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
   }
 
   switch (action) {
-    case 'login': {
-      // Initiate GitHub OAuth flow
-      const redirectUri = `${appUrl}/admin/auth/callback`;
-      const state = generateSessionId(); // Use as CSRF token
-      
-      // GitHub OAuth scope options:
-      // - 'public_repo': Access public repositories only
-      // - 'repo': Full access to private repositories (all repos)
-      // - 'repo:status': Access commit status only
-      // Note: Users can still select which repos to use via the admin UI
-      // Default to 'repo' to allow access to both public and private repos
-      // Users will be able to choose which repos to use in the admin interface
-      const scope = envVars.GITHUB_SCOPE || 'repo';
-      
-      // Store state temporarily (1 hour)
-      if (sessions) {
-        await sessions.put(`oauth_state_${state}`, '1', { expirationTtl: 3600 });
-      }
-      
-      const githubAuthUrl = 
-        `https://github.com/login/oauth/authorize?` +
-        `client_id=${encodeURIComponent(clientId)}&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-        `scope=${encodeURIComponent(scope)}&` +
-        `state=${encodeURIComponent(state)}`;
-      
-      return Response.redirect(githubAuthUrl, 302);
-    }
-
     case 'callback': {
-      // Handle OAuth callback
+      // Handle GitHub App installation callback
       const code = url.searchParams.get('code');
-      const state = url.searchParams.get('state');
-      
-      if (!code) {
-        return new Response('Missing code parameter', { status: 400 });
+      const installationId = url.searchParams.get('installation_id');
+      const setupAction = url.searchParams.get('setup_action');
+
+      if (!installationId) {
+        return new Response('Missing installation_id parameter', { status: 400 });
       }
-      
-      if (!state) {
-        return new Response('Missing state parameter', { status: 400 });
-      }
-      
-      // Verify state (CSRF protection)
-      if (sessions) {
-        const stateValid = await sessions.get(`oauth_state_${state}`);
-        if (!stateValid) {
-          return new Response('Invalid state parameter', { status: 400 });
-        }
-        await sessions.delete(`oauth_state_${state}`);
-      }
-      
+
       try {
-        const redirectUri = `${appUrl}/admin/auth/callback`;
-        const token = await exchangeCodeForToken(code, clientId, clientSecret, redirectUri);
-        const user = await getGitHubUser(token);
+        // Import GitHub App utilities
+        const githubApp = await import('./utils/github-app.js');
         
-        // Create session
-        const sessionId = generateSessionId();
-        const session: Session = {
-          token,
-          user,
-          expiresAt: Date.now() + (3600 * 24 * 7 * 1000), // 7 days
-        };
+        // Get installation info to verify it exists
+        const installation = await githubApp.getInstallation(appId, privateKey, installationId);
         
-        if (sessions) {
-          await storeSession(sessions, sessionId, session);
+        // Get repositories accessible to this installation
+        const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+        const repoFullNames = repos.map(r => r.full_name);
+
+        // If setup_action is 'install', store the installation and create a session
+        if (setupAction === 'install') {
+          // Create a session for the user who installed the app
+          // Use installation account info to identify the user
+          const sessionId = generateSessionId();
+          
+          // Create a user object from installation account
+          // Note: For organization installations, account.type will be 'Organization'
+          const user: GitHubUser = {
+            login: installation.account.login,
+            id: 0, // We don't have user ID from installation, using 0 as placeholder
+            avatar_url: '', // Not available from installation
+            name: installation.account.login,
+            email: '',
+          };
+
+          // Create session with this installation
+          const session: Session = {
+            user,
+            expiresAt: Date.now() + (3600 * 24 * 7 * 1000), // 7 days
+            installations: [installationId],
+          };
+
+          if (sessions) {
+            // Store installation info using account login as identifier
+            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            
+            // Store session
+            await storeSession(sessions, sessionId, session);
+          }
+
+          // Redirect to admin with session cookie
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': '/admin',
+              'Set-Cookie': createSessionCookie(sessionId),
+            },
+          });
         }
-        
-        // Redirect to admin with session cookie
-        return new Response(null, {
-          status: 302,
-          headers: {
-            'Location': '/admin',
-            'Set-Cookie': createSessionCookie(sessionId),
-          },
-        });
+
+        // If code is provided but setup_action is not 'install', handle as update
+        // This happens when installation is updated (e.g., repositories added/removed)
+        if (!setupAction) {
+          // Get installation info
+          const installation = await githubApp.getInstallation(appId, privateKey, installationId);
+          const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+          const repoFullNames = repos.map(r => r.full_name);
+
+          // Create user from installation account
+          const user: GitHubUser = {
+            login: installation.account.login,
+            id: 0,
+            avatar_url: '',
+            name: installation.account.login,
+            email: '',
+          };
+
+          // Find existing session or create new one
+          const sessionId = generateSessionId();
+          const session: Session = {
+            user,
+            expiresAt: Date.now() + (3600 * 24 * 7 * 1000),
+            installations: [installationId],
+          };
+
+          if (sessions) {
+            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            await storeSession(sessions, sessionId, session);
+          }
+
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': '/admin',
+              'Set-Cookie': createSessionCookie(sessionId),
+            },
+          });
+        }
+
+        return new Response('Invalid callback parameters', { status: 400 });
       } catch (error) {
         const err = error as Error;
         return new Response(
@@ -264,6 +251,17 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
           }
         );
       }
+    }
+
+    case 'user': {
+      // This endpoint is no longer needed for GitHub App flow
+      // Users are identified through installations
+      return new Response('This endpoint is not used for GitHub App authentication', { status: 404 });
+    }
+
+    case 'user-callback': {
+      // This endpoint is no longer needed for GitHub App flow
+      return new Response('This endpoint is not used for GitHub App authentication', { status: 404 });
     }
 
     case 'logout': {
@@ -363,8 +361,9 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
 
 /**
  * Get authenticated user from request
+ * Returns user info and installation IDs they have access to
  */
-export async function getAuthenticatedUser(request: Request, env?: Env): Promise<{ user: GitHubUser; token: string } | null> {
+export async function getAuthenticatedUser(request: Request, env?: Env): Promise<{ user: GitHubUser; installations: string[] } | null> {
   const envVars = env as Env || {};
   const sessions = envVars.SESSIONS;
   
@@ -376,5 +375,5 @@ export async function getAuthenticatedUser(request: Request, env?: Env): Promise
   const session = await getSession(sessions, sessionId);
   if (!session) return null;
   
-  return { user: session.user, token: session.token };
+  return { user: session.user, installations: session.installations };
 }

@@ -1,13 +1,13 @@
 /**
  * Repositories API handler
- * Allows users to list and select which repositories they want to use
+ * Lists repositories accessible through GitHub App installations
  */
 import { getAuthenticatedUser } from './auth.js';
-import { GitHubAPI } from '../utils/github.js';
+import { getInstallationRepos, getUserInstallations, getInstallationInfo } from '../utils/github-app.js';
 
 interface Env {
-  GITHUB_CLIENT_ID?: string;
-  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   SESSIONS?: KVNamespace;
   APP_URL?: string;
 }
@@ -16,9 +16,7 @@ interface GitHubRepository {
   id: number;
   name: string;
   full_name: string;
-  owner: {
-    login: string;
-  };
+  owner: string;
   private: boolean;
   description: string | null;
   default_branch: string;
@@ -48,32 +46,87 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
   const action = pathParts[2];
   const envVars = env as Env || {};
   const sessions = envVars.SESSIONS;
-  const github = new GitHubAPI(auth.token);
+  const appId = envVars.GITHUB_APP_ID;
+  const privateKey = envVars.GITHUB_APP_PRIVATE_KEY;
+
+  if (!sessions || !appId || !privateKey) {
+    return new Response(
+      JSON.stringify({ error: 'GitHub App not configured' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
 
   switch (action) {
     case 'list': {
-      // List all repositories the user has access to
+      // List all repositories accessible through user's installations
       try {
-        // Get user's repositories (including private if scope allows)
-        const repos = await github.apiRequest<GitHubRepository[]>('/user/repos?per_page=100&sort=updated');
+        // Use user login for installations lookup
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
         
-        // Get selected repositories for this user
-        const selectedRepos = await getSelectedRepos(sessions, auth.user.id);
+        if (userInstallations.length === 0) {
+          return new Response(
+            JSON.stringify({ repos: [] }),
+            {
+              headers: { 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        // Get repos from all installations
+        const allRepos: Map<string, GitHubRepository> = new Map();
         
-        // Mark which repos are selected
-        const reposWithSelection = repos.map(repo => ({
-          id: repo.id,
-          name: repo.name,
-          full_name: repo.full_name,
-          owner: repo.owner.login,
-          private: repo.private,
-          description: repo.description,
-          default_branch: repo.default_branch,
-          selected: selectedRepos.includes(repo.full_name),
-        }));
+        for (const installationId of userInstallations) {
+          try {
+            const repos = await getInstallationRepos(appId, privateKey, installationId);
+            const installationInfo = await getInstallationInfo(sessions, installationId);
+            
+            // Mark repos as selected if they're in the installation's selected repos
+            const selectedRepos = installationInfo?.repos || [];
+            
+            for (const repo of repos) {
+              if (!allRepos.has(repo.full_name)) {
+                allRepos.set(repo.full_name, {
+                  id: repo.id,
+                  name: repo.name,
+                  full_name: repo.full_name,
+                  owner: repo.full_name.split('/')[0],
+                  private: repo.private,
+                  description: null, // Installation API doesn't return description
+                  default_branch: repo.default_branch,
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error fetching repos for installation ${installationId}:`, error);
+            // Continue with other installations
+          }
+        }
+
+        // Convert map to array and mark selected repos
+        const reposList = await Promise.all(
+          Array.from(allRepos.values()).map(async (repo) => {
+            // Check if repo is selected in any installation
+            let selected = false;
+            for (const installationId of userInstallations) {
+              const installationInfo = await getInstallationInfo(sessions, installationId);
+              if (installationInfo && installationInfo.repos.includes(repo.full_name)) {
+                selected = true;
+                break;
+              }
+            }
+            
+            return {
+              ...repo,
+              selected,
+            };
+          })
+        );
 
         return new Response(
-          JSON.stringify({ repos: reposWithSelection }),
+          JSON.stringify({ repos: reposList }),
           {
             headers: { 'Content-Type': 'application/json' },
           }
@@ -91,18 +144,18 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
     }
 
     case 'select': {
-      // Update selected repositories
+      // Update selected repositories for an installation
       if (request.method !== 'POST') {
         return new Response('Method not allowed', { status: 405 });
       }
 
       try {
         const body = await request.json();
-        const { repos } = body; // Array of repo full_names like ["owner/repo"]
+        const { repos, installationId } = body; // Array of repo full_names and installation ID
 
-        if (!Array.isArray(repos)) {
+        if (!Array.isArray(repos) || !installationId) {
           return new Response(
-            JSON.stringify({ error: 'Invalid request body' }),
+            JSON.stringify({ error: 'Invalid request body. Expected { repos: string[], installationId: string }' }),
             {
               status: 400,
               headers: { 'Content-Type': 'application/json' },
@@ -110,13 +163,11 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
           );
         }
 
-        // Store selected repos in KV
-        if (sessions) {
-          await sessions.put(
-            `selected_repos_${auth.user.id}`,
-            JSON.stringify(repos),
-            { expirationTtl: 3600 * 24 * 365 } // 1 year
-          );
+        // Update installation info with selected repos
+        const installationInfo = await getInstallationInfo(sessions, installationId);
+        if (installationInfo) {
+          const githubApp = await import('../utils/github-app.js');
+          await githubApp.storeInstallation(sessions, installationId, auth.user.login, repos);
         }
 
         return new Response(
@@ -138,11 +189,23 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
     }
 
     case 'selected': {
-      // Get currently selected repositories
+      // Get currently selected repositories across all installations
       try {
-        const selectedRepos = await getSelectedRepos(sessions, auth.user.id);
+        const userInstallations = await getUserInstallations(sessions, auth.user.login);
+        const allSelectedRepos: string[] = [];
+        
+        for (const installationId of userInstallations) {
+          const installationInfo = await getInstallationInfo(sessions, installationId);
+          if (installationInfo && installationInfo.repos) {
+            allSelectedRepos.push(...installationInfo.repos);
+          }
+        }
+
+        // Remove duplicates
+        const uniqueRepos = Array.from(new Set(allSelectedRepos));
+
         return new Response(
-          JSON.stringify({ repos: selectedRepos }),
+          JSON.stringify({ repos: uniqueRepos }),
           {
             headers: { 'Content-Type': 'application/json' },
           }
@@ -163,32 +226,3 @@ export async function handleReposAPI(request: Request, env?: Env): Promise<Respo
       return new Response('Invalid action', { status: 400 });
   }
 }
-
-/**
- * Get selected repositories for a user
- */
-async function getSelectedRepos(sessions: KVNamespace | undefined, userId: number): Promise<string[]> {
-  if (!sessions) return [];
-  
-  const data = await sessions.get(`selected_repos_${userId}`);
-  if (!data) return [];
-  
-  try {
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Check if a repository is selected by the user
- */
-export async function isRepoSelected(
-  sessions: KVNamespace | undefined,
-  userId: number,
-  repoFullName: string
-): Promise<boolean> {
-  const selectedRepos = await getSelectedRepos(sessions, userId);
-  return selectedRepos.includes(repoFullName);
-}
-

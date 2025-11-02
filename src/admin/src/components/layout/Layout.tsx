@@ -37,10 +37,11 @@ export default function Layout({ children }: LayoutProps) {
                   variant="default"
                   size="sm"
                   onClick={() => {
-                    window.location.href = '/api/auth/login';
+                    // Redirect to GitHub App installation page
+                    window.location.href = 'https://github.com/apps/littlecms/installations/new';
                   }}
                 >
-                  Login with GitHub
+                  Install GitHub App
                 </Button>
               )}
             </nav>

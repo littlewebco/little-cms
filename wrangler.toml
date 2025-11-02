@@ -1,0 +1,29 @@
+# wrangler.toml - Configuration for the Cloudflare Worker
+
+# Top-level configuration
+name = "little-cms" # Worker name - customize as needed
+main = "dist/worker.js" # The entry point for your worker script
+compatibility_date = "2025-11-02" # Use a recent compatibility date
+
+# Set the account ID for deployment (replace with your account ID)
+account_id = "1c4db339cf161e727379d041b5b7857d"
+
+# Environment variables (set via GitHub Secrets or wrangler secret put)
+# [vars]
+# These will be set automatically from GitHub Actions secrets
+# GITHUB_CLIENT_ID = "set via GitHub Secrets"
+# GITHUB_CLIENT_SECRET = "set via GitHub Secrets"
+# APP_URL = "set via GitHub Secrets"
+
+# KV namespace bindings (for sessions)
+# Create a KV namespace first: wrangler kv:namespace create "SESSIONS"
+# Then add the binding below with your namespace IDs
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "61db9193da124a16aa98d1f430f80ed4"
+preview_id = "e4695b3c5f9741c9b2f7f75d26f32fe6"
+
+# Optional: Specify build steps
+# [build]
+# command = "npm run build"
+# upload.format = "modules"

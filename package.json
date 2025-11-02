@@ -1,0 +1,62 @@
+{
+  "name": "@little/little-cms",
+  "version": "1.0.0",
+  "description": "Git-powered CMS for static sites",
+  "type": "module",
+  "main": "./dist/worker.js",
+  "bin": {
+    "little-cms": "./bin/little-cms.js"
+  },
+  "scripts": {
+    "build": "npm run build:worker && (npm run build:admin || echo 'Admin UI build skipped')",
+    "build:admin": "cd src/admin && npm install && npm run build",
+    "build:worker": "esbuild src/worker/index.ts --bundle --outfile=dist/worker.js --format=iife --platform=browser --target=es2022",
+    "build:cli": "esbuild src/cli/*.ts --bundle --outdir=dist/cli --format=esm --platform=node --target=node20",
+    "deploy": "wrangler deploy",
+    "dev": "npm run dev:admin",
+    "dev:admin": "cd src/admin && npm run dev",
+    "dev:worker": "wrangler dev",
+    "init": "node --import tsx bin/little-cms.js init",
+    "setup": "node --import tsx bin/little-cms.js setup"
+  },
+  "keywords": [
+    "cms",
+    "git",
+    "github",
+    "content-management",
+    "static-site",
+    "cloudflare-workers"
+  ],
+  "author": "Little Cloud",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/littlewebco/little-cms.git"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20241113.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "autoprefixer": "^10.4.19",
+    "esbuild": "^0.23.1",
+    "postcss": "^8.4.40",
+    "tailwindcss": "^3.4.7",
+    "tsx": "^4.20.6",
+    "typescript": "^5.5.4",
+    "wrangler": "^4.45.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src",
+    "templates",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}

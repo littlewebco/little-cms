@@ -1,7 +1,8 @@
 /**
  * Homepage handler for LittleCMS
  * Showcases the embed functionality with live examples
- * HTML is embedded directly to ensure it's served even if Cloudflare assets intercept the route
+
+* HTML is embedded directly to ensure it's served even if Cloudflare assets intercept the route
  */
 export async function handleHomepage(request: Request): Promise<Response> {
   try {

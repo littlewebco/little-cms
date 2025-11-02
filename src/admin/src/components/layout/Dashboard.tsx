@@ -224,7 +224,18 @@ export default function Dashboard() {
     // Use the first selected repo, or allow user to select if multiple
     const repo = selectedRepos[0];
     
-    const filePath = `posts/${data.filename}`;
+    // Determine file path based on category
+    let filePath: string;
+    let categoryFromPath: string | undefined;
+    
+    if (data.category) {
+      // Create file in category folder
+      filePath = `posts/${data.category}/${data.filename}`;
+      categoryFromPath = data.category;
+    } else {
+      // Create file directly in posts folder
+      filePath = `posts/${data.filename}`;
+    }
 
     // Build front matter with all fields
     const frontMatter: Record<string, any> = {
@@ -232,9 +243,11 @@ export default function Dashboard() {
       date: data.date,
     };
 
-    if (data.category) {
-      frontMatter.category = data.category;
+    // Always include category in front matter if it exists
+    if (categoryFromPath) {
+      frontMatter.category = categoryFromPath;
     }
+    
     if (data.excerpt) {
       frontMatter.excerpt = data.excerpt;
     }

@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import RepositorySelector from './RepositorySelector';
 import InstallationManager from './InstallationManager';
+import CategoryManager from './CategoryManager';
 import { Button } from '@/components/ui/button';
 import { RotateCw } from 'lucide-react';
 
@@ -63,6 +64,14 @@ export default function SettingsPage() {
             only selected repositories will be accessible through the CMS.
           </p>
           <RepositorySelector />
+        </div>
+
+        <div>
+          <h3 className="text-xl font-semibold mb-4">Categories</h3>
+          <p className="text-muted-foreground mb-4">
+            Manage post categories. Rename categories, view posts by category, and organize your content.
+          </p>
+          <CategoryManager />
         </div>
       </div>
     </div>

@@ -82,15 +82,29 @@ export default function FileBrowser({ repo, onFileSelect }: FileBrowserProps) {
       ? `posts/${data.filename}`
       : `${currentPath}/${data.filename}`;
 
+    // Extract category from path
+    // Path format: posts/category/filename.md or posts/filename.md
+    const pathParts = filePath.split('/');
+    let categoryFromPath: string | undefined;
+    
+    if (pathParts.length > 2 && pathParts[0] === 'posts') {
+      // File is in a category folder: posts/category/filename.md
+      categoryFromPath = pathParts[1];
+    }
+
     // Build front matter with all fields
     const frontMatter: Record<string, any> = {
       title: data.title,
       date: data.date,
     };
 
-    if (data.category) {
+    // Use category from path if available, otherwise use form data
+    if (categoryFromPath) {
+      frontMatter.category = categoryFromPath;
+    } else if (data.category) {
       frontMatter.category = data.category;
     }
+    
     if (data.excerpt) {
       frontMatter.excerpt = data.excerpt;
     }

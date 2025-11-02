@@ -12,7 +12,7 @@ interface GitHubFile {
 }
 
 interface FrontMatter {
-  [key: string]: string | number | boolean;
+  [key: string]: string | number | boolean | string[];
 }
 
 interface MarkdownEditorProps {
@@ -34,35 +34,65 @@ function parseFrontMatter(content: string): { frontMatter: FrontMatter; body: st
   const body = match[2];
 
   const frontMatter: FrontMatter = {};
-  frontMatterText.split('\n').forEach((line) => {
+  const lines = frontMatterText.split('\n');
+  let i = 0;
+  
+  while (i < lines.length) {
+    const line = lines[i].trim();
     const colonIndex = line.indexOf(':');
+    
     if (colonIndex > 0) {
       const key = line.substring(0, colonIndex).trim();
       const value = line.substring(colonIndex + 1).trim();
-      // Try to parse as number or boolean
-      if (value === 'true') {
-        frontMatter[key] = true;
-      } else if (value === 'false') {
-        frontMatter[key] = false;
-      } else if (!isNaN(Number(value))) {
-        frontMatter[key] = Number(value);
+      
+      // Check if this is an array (next line starts with -)
+      if (i + 1 < lines.length && lines[i + 1].trim().startsWith('-')) {
+        // Parse YAML array
+        const array: string[] = [];
+        i++; // Move to first array item
+        while (i < lines.length && lines[i].trim().startsWith('-')) {
+          const item = lines[i].trim().substring(1).trim();
+          array.push(item.replace(/^["']|["']$/g, ''));
+          i++;
+        }
+        frontMatter[key] = array;
+        i--; // Adjust for loop increment
       } else {
-        // Remove quotes if present
-        frontMatter[key] = value.replace(/^["']|["']$/g, '');
+        // Parse as simple value
+        if (value === 'true') {
+          frontMatter[key] = true;
+        } else if (value === 'false') {
+          frontMatter[key] = false;
+        } else if (!isNaN(Number(value)) && value !== '') {
+          frontMatter[key] = Number(value);
+        } else {
+          frontMatter[key] = value.replace(/^["']|["']$/g, '');
+        }
       }
     }
-  });
+    i++;
+  }
 
   return { frontMatter, body };
 }
 
 // Serialize front matter back to YAML
 function serializeFrontMatter(frontMatter: FrontMatter, body: string): string {
-  const frontMatterLines = Object.entries(frontMatter).map(([key, value]) => {
-    if (typeof value === 'string') {
-      return `${key}: "${value}"`;
+  const frontMatterLines: string[] = [];
+  
+  Object.entries(frontMatter).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      // Format arrays as YAML list
+      frontMatterLines.push(`${key}:`);
+      value.forEach(item => {
+        frontMatterLines.push(`  - ${item}`);
+      });
+    } else if (typeof value === 'string' && (value.includes(':') || value.includes("'") || value.includes('"'))) {
+      // Escape strings that need quotes
+      frontMatterLines.push(`${key}: "${value.replace(/"/g, '\\"')}"`);
+    } else {
+      frontMatterLines.push(`${key}: ${value}`);
     }
-    return `${key}: ${value}`;
   });
 
   if (frontMatterLines.length === 0) {
@@ -114,7 +144,24 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
           .then(res => res.text())
           .then(text => {
             const parsed = parseFrontMatter(text);
-            setFrontMatter(parsed.frontMatter);
+            
+            // Sync category from file path
+            const pathParts = file.path.split('/');
+            let categoryFromPath: string | undefined;
+            
+            if (pathParts.length > 2 && pathParts[0] === 'posts') {
+              categoryFromPath = pathParts[1];
+            }
+            
+            // Update front matter to match folder structure
+            const syncedFrontMatter = { ...parsed.frontMatter };
+            if (categoryFromPath) {
+              syncedFrontMatter.category = categoryFromPath;
+            } else {
+              delete syncedFrontMatter.category;
+            }
+            
+            setFrontMatter(syncedFrontMatter);
             setBody(parsed.body);
             setOriginalContent(text);
           })
@@ -126,12 +173,29 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
 
       if (content) {
         const parsed = parseFrontMatter(content);
-        setFrontMatter(parsed.frontMatter);
+        
+        // Sync category from file path
+        const pathParts = file.path.split('/');
+        let categoryFromPath: string | undefined;
+        
+        if (pathParts.length > 2 && pathParts[0] === 'posts') {
+          categoryFromPath = pathParts[1];
+        }
+        
+        // Update front matter to match folder structure
+        const syncedFrontMatter = { ...parsed.frontMatter };
+        if (categoryFromPath) {
+          syncedFrontMatter.category = categoryFromPath;
+        } else {
+          delete syncedFrontMatter.category;
+        }
+        
+        setFrontMatter(syncedFrontMatter);
         setBody(parsed.body);
         setOriginalContent(content);
       }
     }
-  }, [data]);
+  }, [data, file.path]);
 
   // Save mutation
   const saveMutation = useMutation({
@@ -169,7 +233,29 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
     const message = prompt('Enter commit message:', `Update ${file.name}`);
     if (!message) return;
 
-    const content = serializeFrontMatter(frontMatter, body);
+    // Extract category from file path
+    // Path format: posts/category/filename.md or posts/filename.md
+    const pathParts = file.path.split('/');
+    let categoryFromPath: string | undefined;
+    
+    if (pathParts.length > 2 && pathParts[0] === 'posts') {
+      // File is in a category folder: posts/category/filename.md
+      categoryFromPath = pathParts[1];
+    } else if (pathParts.length === 2 && pathParts[0] === 'posts') {
+      // File is directly in posts: posts/filename.md (uncategorized)
+      categoryFromPath = undefined;
+    }
+
+    // Update front matter with category from path
+    const updatedFrontMatter = { ...frontMatter };
+    if (categoryFromPath) {
+      updatedFrontMatter.category = categoryFromPath;
+    } else {
+      // Remove category if file is in root posts folder
+      delete updatedFrontMatter.category;
+    }
+
+    const content = serializeFrontMatter(updatedFrontMatter, body);
     saveMutation.mutate({ content, message });
   };
 

@@ -14,7 +14,7 @@ const INDEX_HTML = `<!DOCTYPE html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
-    <script type="module" crossorigin src="/assets/index-mTk3WK3_.js"></script>
+    <script type="module" crossorigin src="/assets/index-Cbu21q-c.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CI894KBj.css">
   </head>
   <body>

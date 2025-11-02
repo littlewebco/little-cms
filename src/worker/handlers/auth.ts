@@ -3,6 +3,14 @@
  * Handles GitHub App installation flow with session management
  */
 
+import { 
+  getInstallation, 
+  getInstallationRepos, 
+  storeInstallation, 
+  getUserInstallations,
+  listInstallations
+} from '../utils/github-app.js';
+
 interface Env {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
@@ -139,6 +147,148 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
   }
 
   switch (action) {
+    case 'login': {
+      // Redirect to GitHub App installation page with state parameter
+      // The state will be used to redirect back after installation
+      const state = generateSessionId();
+      const returnUrl = url.searchParams.get('return_url') || '/admin';
+      
+      // Store return URL temporarily (1 hour)
+      if (sessions) {
+        await sessions.put(`install_return_${state}`, returnUrl, { expirationTtl: 3600 });
+      }
+      
+      // Redirect to GitHub App installation with state
+      const installUrl = `https://github.com/apps/littlecms/installations/new?state=${encodeURIComponent(state)}`;
+      return Response.redirect(installUrl, 302);
+    }
+
+    case 'link': {
+      // Link an existing installation (for users who already installed the app)
+      // Accepts installation_id as query parameter or in body
+      let installationId: string | null = null;
+      
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json() as { installation_id?: string };
+          installationId = body.installation_id || null;
+        } catch {
+          // Body parsing failed, try query param
+        }
+      }
+      
+      installationId = installationId || url.searchParams.get('installation_id');
+      
+      if (!installationId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing installation_id parameter' }),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      try {
+        // Get installation info
+        const installation = await getInstallation(appId, privateKey, installationId);
+        const repos = await getInstallationRepos(appId, privateKey, installationId);
+        const repoFullNames = repos.map(r => r.full_name);
+
+        // Create user from installation account
+        const user: GitHubUser = {
+          login: installation.account.login,
+          id: 0,
+          avatar_url: '',
+          name: installation.account.login,
+          email: '',
+        };
+
+        // Create session
+        const sessionId = generateSessionId();
+        const session: Session = {
+          user,
+          expiresAt: Date.now() + (3600 * 24 * 7 * 1000),
+          installations: [installationId],
+        };
+
+        if (sessions) {
+          await storeInstallation(sessions, installationId, user.login, repoFullNames);
+          await storeSession(sessions, sessionId, session);
+        }
+
+        // If this is a GET request, redirect to admin
+        if (request.method === 'GET') {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              'Location': `${appUrl}/admin`,
+              'Set-Cookie': createSessionCookie(sessionId),
+            },
+          });
+        }
+
+        // If POST, return JSON response
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            user,
+            installation: {
+              id: installation.id,
+              account: installation.account,
+              repos: repoFullNames.length
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Set-Cookie': createSessionCookie(sessionId),
+            },
+          }
+        );
+      } catch (error) {
+        const err = error as Error;
+        return new Response(
+          JSON.stringify({ error: err.message }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
+    case 'installations': {
+      // List all installations for the app (for users to find their installation ID)
+      try {
+        const installations = await listInstallations(appId, privateKey);
+        
+        // Return installations with basic info
+        const installationsList = installations.map(inst => ({
+          id: inst.id,
+          account: inst.account,
+          repository_selection: inst.repository_selection,
+        }));
+
+        return new Response(
+          JSON.stringify({ installations: installationsList }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      } catch (error) {
+        const err = error as Error;
+        return new Response(
+          JSON.stringify({ error: err.message }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+
     case 'callback': {
       // Handle GitHub App installation callback
       const code = url.searchParams.get('code');
@@ -150,18 +300,33 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
       }
 
       try {
-        // Import GitHub App utilities
-        const githubApp = await import('./utils/github-app.js');
-        
         // Get installation info to verify it exists
-        const installation = await githubApp.getInstallation(appId, privateKey, installationId);
+        const installation = await getInstallation(appId, privateKey, installationId);
         
         // Get repositories accessible to this installation
-        const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+        const repos = await getInstallationRepos(appId, privateKey, installationId);
         const repoFullNames = repos.map(r => r.full_name);
 
         // If setup_action is 'install', store the installation and create a session
         if (setupAction === 'install') {
+          // Check if there's a return URL from state parameter
+          const state = url.searchParams.get('state');
+          let returnUrl = '/admin';
+          if (state && sessions) {
+            const storedReturnUrl = await sessions.get(`install_return_${state}`);
+            if (storedReturnUrl) {
+              // Normalize return URL - ensure it's a path, not a full URL
+              const parsedReturnUrl = new URL(storedReturnUrl, 'http://dummy');
+              returnUrl = parsedReturnUrl.pathname || '/admin';
+              await sessions.delete(`install_return_${state}`);
+            }
+          }
+          
+          // Ensure returnUrl starts with /
+          if (!returnUrl.startsWith('/')) {
+            returnUrl = '/' + returnUrl;
+          }
+          
           // Create a session for the user who installed the app
           // Use installation account info to identify the user
           const sessionId = generateSessionId();
@@ -185,7 +350,7 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
 
           if (sessions) {
             // Store installation info using account login as identifier
-            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            await storeInstallation(sessions, installationId, user.login, repoFullNames);
             
             // Store session
             await storeSession(sessions, sessionId, session);
@@ -195,7 +360,7 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
           return new Response(null, {
             status: 302,
             headers: {
-              'Location': '/admin',
+              'Location': `${appUrl}${returnUrl}`,
               'Set-Cookie': createSessionCookie(sessionId),
             },
           });
@@ -205,8 +370,8 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
         // This happens when installation is updated (e.g., repositories added/removed)
         if (!setupAction) {
           // Get installation info
-          const installation = await githubApp.getInstallation(appId, privateKey, installationId);
-          const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+          const installation = await getInstallation(appId, privateKey, installationId);
+          const repos = await getInstallationRepos(appId, privateKey, installationId);
           const repoFullNames = repos.map(r => r.full_name);
 
           // Create user from installation account
@@ -227,14 +392,14 @@ export async function handleAuth(request: Request, env?: Env): Promise<Response>
           };
 
           if (sessions) {
-            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            await storeInstallation(sessions, installationId, user.login, repoFullNames);
             await storeSession(sessions, sessionId, session);
           }
 
           return new Response(null, {
             status: 302,
             headers: {
-              'Location': '/admin',
+              'Location': `${appUrl}/admin`,
               'Set-Cookie': createSessionCookie(sessionId),
             },
           });

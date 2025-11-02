@@ -34,8 +34,8 @@ export function useAuth() {
 export function useLogin() {
   return useMutation({
     mutationFn: async () => {
-      // Redirect to login endpoint
-      window.location.href = '/api/auth/login';
+      // Redirect to GitHub App installation page
+      window.location.href = 'https://github.com/apps/littlecms/installations/new';
     },
   });
 }

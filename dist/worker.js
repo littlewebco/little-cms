@@ -17,12 +17,79 @@ __export(github_app_exports, {
   getInstallationRepos: () => getInstallationRepos,
   getInstallationToken: () => getInstallationToken,
   getUserInstallations: () => getUserInstallations,
+  listInstallations: () => listInstallations,
   storeInstallation: () => storeInstallation
 });
+function encodeDERLength(length) {
+  if (length < 128) {
+    return new Uint8Array([length]);
+  }
+  const lengthBytes = [];
+  let len = length;
+  while (len > 0) {
+    lengthBytes.unshift(len & 255);
+    len >>= 8;
+  }
+  return new Uint8Array([128 | lengthBytes.length, ...lengthBytes]);
+}
+function convertPKCS1ToPKCS8(pkcs1Bytes) {
+  const rsaAlgorithmId = new Uint8Array([
+    48,
+    13,
+    // SEQUENCE, length 13
+    6,
+    9,
+    // OID, length 9
+    42,
+    134,
+    72,
+    134,
+    247,
+    13,
+    1,
+    1,
+    1,
+    // 1.2.840.113549.1.1.1
+    5,
+    0
+    // NULL
+  ]);
+  const version = new Uint8Array([2, 1, 0]);
+  const pkcs1Length = pkcs1Bytes.length;
+  const octetStringLengthBytes = encodeDERLength(pkcs1Length);
+  const octetString = new Uint8Array(1 + octetStringLengthBytes.length + pkcs1Length);
+  let offset = 0;
+  octetString[offset++] = 4;
+  octetString.set(octetStringLengthBytes, offset);
+  offset += octetStringLengthBytes.length;
+  octetString.set(pkcs1Bytes, offset);
+  const versionLength = version.length;
+  const algorithmIdLength = rsaAlgorithmId.length;
+  const octetStringLength = octetString.length;
+  const innerSequenceLength = versionLength + algorithmIdLength + octetStringLength;
+  const innerSequenceLengthBytes = encodeDERLength(innerSequenceLength);
+  const pkcs8 = new Uint8Array(
+    1 + // SEQUENCE tag
+    innerSequenceLengthBytes.length + // length encoding
+    innerSequenceLength
+    // actual content
+  );
+  offset = 0;
+  pkcs8[offset++] = 48;
+  pkcs8.set(innerSequenceLengthBytes, offset);
+  offset += innerSequenceLengthBytes.length;
+  pkcs8.set(version, offset);
+  offset += version.length;
+  pkcs8.set(rsaAlgorithmId, offset);
+  offset += rsaAlgorithmId.length;
+  pkcs8.set(octetString, offset);
+  return pkcs8;
+}
 async function generateAppJWT(appId, privateKey) {
   let keyData = privateKey.replace(/-----BEGIN RSA PRIVATE KEY-----/g, "").replace(/-----END RSA PRIVATE KEY-----/g, "").replace(/-----BEGIN PRIVATE KEY-----/g, "").replace(/-----END PRIVATE KEY-----/g, "").replace(/\s/g, "");
   const keyBytes = Uint8Array.from(atob(keyData), (c) => c.charCodeAt(0));
-  const isPKCS8 = privateKey.includes("BEGIN PRIVATE KEY");
+  const isPKCS8 = privateKey.includes("BEGIN PRIVATE KEY") && !privateKey.includes("BEGIN RSA PRIVATE KEY");
+  const isPKCS1 = privateKey.includes("BEGIN RSA PRIVATE KEY");
   let cryptoKey;
   try {
     if (isPKCS8) {
@@ -36,11 +103,27 @@ async function generateAppJWT(appId, privateKey) {
         false,
         ["sign"]
       );
+    } else if (isPKCS1) {
+      const pkcs8Bytes = convertPKCS1ToPKCS8(keyBytes);
+      cryptoKey = await crypto.subtle.importKey(
+        "pkcs8",
+        pkcs8Bytes,
+        {
+          name: "RSASSA-PKCS1-v1_5",
+          hash: "SHA-256"
+        },
+        false,
+        ["sign"]
+      );
     } else {
-      throw new Error("PKCS#1 format not directly supported. Please convert to PKCS#8 format or ensure your GitHub App key is in PKCS#8 format.");
+      throw new Error("Unknown key format. Expected BEGIN PRIVATE KEY (PKCS#8) or BEGIN RSA PRIVATE KEY (PKCS#1)");
     }
   } catch (error) {
-    throw new Error(`Failed to import private key: ${error instanceof Error ? error.message : "Unknown error"}. Ensure the key is in PKCS#8 format (BEGIN PRIVATE KEY).`);
+    const errorMsg = error instanceof Error ? error.message : "Unknown error";
+    if (errorMsg.includes("PKCS#1") || errorMsg.includes("PKCS#8")) {
+      throw error;
+    }
+    throw new Error(`Failed to import private key: ${errorMsg}. Please ensure the key is a valid RSA private key in PKCS#1 or PKCS#8 format.`);
   }
   const header = {
     alg: "RS256",
@@ -98,11 +181,26 @@ async function getInstallation(appId, privateKey, installationId) {
   }
   return response.json();
 }
-async function getInstallationRepos(appId, privateKey, installationId) {
+async function listInstallations(appId, privateKey) {
   const jwt = await generateAppJWT(appId, privateKey);
-  const response = await fetch(`https://api.github.com/app/installations/${installationId}/repositories`, {
+  const response = await fetch("https://api.github.com/app/installations", {
     headers: {
       "Authorization": `Bearer ${jwt}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "LittleCMS"
+    }
+  });
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to list installations: ${response.status} ${error}`);
+  }
+  return response.json();
+}
+async function getInstallationRepos(appId, privateKey, installationId) {
+  const installationToken = await getInstallationToken(appId, privateKey, installationId);
+  const response = await fetch(`https://api.github.com/installation/repositories`, {
+    headers: {
+      "Authorization": `Bearer ${installationToken}`,
       "Accept": "application/vnd.github.v3+json",
       "User-Agent": "LittleCMS"
     }
@@ -342,7 +440,7 @@ var INDEX_HTML = `<!DOCTYPE html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
-    <script type="module" crossorigin src="/assets/index-mTk3WK3_.js"></script>
+    <script type="module" crossorigin src="/assets/index-Cbu21q-c.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CI894KBj.css">
   </head>
   <body>
@@ -368,6 +466,7 @@ async function handleAdmin(request, env) {
 }
 
 // src/worker/handlers/auth.ts
+init_github_app();
 function generateSessionId() {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
@@ -424,6 +523,118 @@ async function handleAuth(request, env) {
     );
   }
   switch (action) {
+    case "login": {
+      const state = generateSessionId();
+      const returnUrl = url.searchParams.get("return_url") || "/admin";
+      if (sessions) {
+        await sessions.put(`install_return_${state}`, returnUrl, { expirationTtl: 3600 });
+      }
+      const installUrl = `https://github.com/apps/littlecms/installations/new?state=${encodeURIComponent(state)}`;
+      return Response.redirect(installUrl, 302);
+    }
+    case "link": {
+      let installationId = null;
+      if (request.method === "POST") {
+        try {
+          const body = await request.json();
+          installationId = body.installation_id || null;
+        } catch {
+        }
+      }
+      installationId = installationId || url.searchParams.get("installation_id");
+      if (!installationId) {
+        return new Response(
+          JSON.stringify({ error: "Missing installation_id parameter" }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+      try {
+        const installation = await getInstallation(appId, privateKey, installationId);
+        const repos = await getInstallationRepos(appId, privateKey, installationId);
+        const repoFullNames = repos.map((r) => r.full_name);
+        const user = {
+          login: installation.account.login,
+          id: 0,
+          avatar_url: "",
+          name: installation.account.login,
+          email: ""
+        };
+        const sessionId = generateSessionId();
+        const session = {
+          user,
+          expiresAt: Date.now() + 3600 * 24 * 7 * 1e3,
+          installations: [installationId]
+        };
+        if (sessions) {
+          await storeInstallation(sessions, installationId, user.login, repoFullNames);
+          await storeSession(sessions, sessionId, session);
+        }
+        if (request.method === "GET") {
+          return new Response(null, {
+            status: 302,
+            headers: {
+              "Location": `${appUrl}/admin`,
+              "Set-Cookie": createSessionCookie(sessionId)
+            }
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            success: true,
+            user,
+            installation: {
+              id: installation.id,
+              account: installation.account,
+              repos: repoFullNames.length
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json",
+              "Set-Cookie": createSessionCookie(sessionId)
+            }
+          }
+        );
+      } catch (error) {
+        const err = error;
+        return new Response(
+          JSON.stringify({ error: err.message }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    }
+    case "installations": {
+      try {
+        const installations = await listInstallations(appId, privateKey);
+        const installationsList = installations.map((inst) => ({
+          id: inst.id,
+          account: inst.account,
+          repository_selection: inst.repository_selection
+        }));
+        return new Response(
+          JSON.stringify({ installations: installationsList }),
+          {
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      } catch (error) {
+        const err = error;
+        return new Response(
+          JSON.stringify({ error: err.message }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    }
     case "callback": {
       const code = url.searchParams.get("code");
       const installationId = url.searchParams.get("installation_id");
@@ -432,11 +643,23 @@ async function handleAuth(request, env) {
         return new Response("Missing installation_id parameter", { status: 400 });
       }
       try {
-        const githubApp = await import("./utils/github-app.js");
-        const installation = await githubApp.getInstallation(appId, privateKey, installationId);
-        const repos = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+        const installation = await getInstallation(appId, privateKey, installationId);
+        const repos = await getInstallationRepos(appId, privateKey, installationId);
         const repoFullNames = repos.map((r) => r.full_name);
         if (setupAction === "install") {
+          const state = url.searchParams.get("state");
+          let returnUrl = "/admin";
+          if (state && sessions) {
+            const storedReturnUrl = await sessions.get(`install_return_${state}`);
+            if (storedReturnUrl) {
+              const parsedReturnUrl = new URL(storedReturnUrl, "http://dummy");
+              returnUrl = parsedReturnUrl.pathname || "/admin";
+              await sessions.delete(`install_return_${state}`);
+            }
+          }
+          if (!returnUrl.startsWith("/")) {
+            returnUrl = "/" + returnUrl;
+          }
           const sessionId = generateSessionId();
           const user = {
             login: installation.account.login,
@@ -454,20 +677,20 @@ async function handleAuth(request, env) {
             installations: [installationId]
           };
           if (sessions) {
-            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames);
+            await storeInstallation(sessions, installationId, user.login, repoFullNames);
             await storeSession(sessions, sessionId, session);
           }
           return new Response(null, {
             status: 302,
             headers: {
-              "Location": "/admin",
+              "Location": `${appUrl}${returnUrl}`,
               "Set-Cookie": createSessionCookie(sessionId)
             }
           });
         }
         if (!setupAction) {
-          const installation2 = await githubApp.getInstallation(appId, privateKey, installationId);
-          const repos2 = await githubApp.getInstallationRepos(appId, privateKey, installationId);
+          const installation2 = await getInstallation(appId, privateKey, installationId);
+          const repos2 = await getInstallationRepos(appId, privateKey, installationId);
           const repoFullNames2 = repos2.map((r) => r.full_name);
           const user = {
             login: installation2.account.login,
@@ -483,13 +706,13 @@ async function handleAuth(request, env) {
             installations: [installationId]
           };
           if (sessions) {
-            await githubApp.storeInstallation(sessions, installationId, user.login, repoFullNames2);
+            await storeInstallation(sessions, installationId, user.login, repoFullNames2);
             await storeSession(sessions, sessionId, session);
           }
           return new Response(null, {
             status: 302,
             headers: {
-              "Location": "/admin",
+              "Location": `${appUrl}/admin`,
               "Set-Cookie": createSessionCookie(sessionId)
             }
           });

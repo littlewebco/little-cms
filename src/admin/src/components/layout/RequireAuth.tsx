@@ -11,8 +11,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      // Redirect to login
-      window.location.href = '/api/auth/login';
+      // Redirect to GitHub App installation page
+      window.location.href = 'https://github.com/apps/littlecms/installations/new';
     }
   }, [isAuthenticated, isLoading, navigate]);
 

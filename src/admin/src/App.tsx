@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import Dashboard from './components/layout/Dashboard';
 import ContentPage from './components/layout/ContentPage';
+import SettingsPage from './components/layout/SettingsPage';
 import SetupWizard from './components/layout/SetupWizard';
 import { RequireAuth } from './components/layout/RequireAuth';
 
@@ -17,6 +18,11 @@ function App() {
         <Route path="content" element={
           <RequireAuth>
             <ContentPage />
+          </RequireAuth>
+        } />
+        <Route path="settings" element={
+          <RequireAuth>
+            <SettingsPage />
           </RequireAuth>
         } />
         <Route path="setup" element={<SetupWizard />} />

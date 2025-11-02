@@ -17,16 +17,20 @@ Your GitHub App is already configured at: https://github.com/apps/littlecms
 
 **Setup URL**: `https://cms.little.cloud/api/auth/callback`
 
+**Important**: You must configure the Setup URL in your GitHub App settings:
+1. Go to https://github.com/settings/apps/littlecms
+2. Scroll to "Post installation" section
+3. Set **Setup URL** to: `https://cms.little.cloud/api/auth/callback`
+4. Save changes
+
+This ensures users are redirected back to your CMS after installing the app.
+
 ## 2. Get Your Private Key
 
 1. Go to your GitHub App settings: https://github.com/settings/apps/littlecms
 2. Scroll down to "Private keys"
 3. Generate a new private key or download the existing one
-4. **Important**: The key must be in PKCS#8 format (`BEGIN PRIVATE KEY`) for Cloudflare Workers compatibility
-   - If your key is in PKCS#1 format (`BEGIN RSA PRIVATE KEY`), convert it:
-     ```bash
-     openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in private-key.pem -out private-key-pkcs8.pem
-     ```
+4. **Key Format**: Both PKCS#1 (`BEGIN RSA PRIVATE KEY`) and PKCS#8 (`BEGIN PRIVATE KEY`) formats are automatically supported. The CMS will convert PKCS#1 keys to PKCS#8 format at runtime if needed.
 
 ## 3. Set Up Cloudflare KV Namespace
 
@@ -120,10 +124,11 @@ https://cms.little.cloud/api/auth/callback
 
 ### Private Key Format Error
 
-If you see "PKCS#1 format not directly supported":
-- Your private key is in PKCS#1 format (`BEGIN RSA PRIVATE KEY`)
-- Convert it to PKCS#8 format using OpenSSL (see step 2 above)
-- Or regenerate the key from GitHub App settings
+If you see "Failed to import private key":
+- Ensure your private key is in valid PEM format (either PKCS#1 or PKCS#8)
+- Check that the key includes the header and footer lines (`-----BEGIN...-----` and `-----END...-----`)
+- Verify the key hasn't been corrupted during copy/paste
+- Try regenerating the key from GitHub App settings
 
 ### Installation Not Found
 

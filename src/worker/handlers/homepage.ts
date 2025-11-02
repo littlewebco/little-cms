@@ -1,13 +1,41 @@
 /**
  * Homepage handler for LittleCMS
  * Showcases the embed functionality with live examples
+ * HTML is embedded directly to ensure it's served even if Cloudflare assets intercept the route
  */
 export async function handleHomepage(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url);
     const baseUrl = url.origin;
 
-    const html = `<!DOCTYPE html>
+    // Generate homepage HTML dynamically
+    const html = generateHomepageHTML(baseUrl);
+
+    return new Response(html, {
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    console.error('Homepage handler error:', err);
+    return new Response(`Error generating homepage: ${err.message}\n\nStack: ${err.stack}`, {
+      status: 500,
+      headers: { 
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-cache',
+      },
+    });
+  }
+}
+
+/**
+ * Generate homepage HTML content
+ */
+function generateHomepageHTML(baseUrl: string): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -320,17 +348,4 @@ ${baseUrl}/?githubUrl=https://github.com/user/repo/blob/main/file.md</code></pre
   </div>
 </body>
 </html>`;
-
-    return new Response(html, {
-      headers: {
-        'Content-Type': 'text/html; charset=utf-8',
-      },
-    });
-  } catch (error) {
-    const err = error as Error;
-    return new Response(`Error generating homepage: ${err.message}`, {
-      status: 500,
-      headers: { 'Content-Type': 'text/plain' },
-    });
-  }
 }

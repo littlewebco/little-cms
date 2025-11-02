@@ -177,7 +177,31 @@ async function handleHomepage(request) {
   try {
     const url = new URL(request.url);
     const baseUrl = url.origin;
-    const html = `<!DOCTYPE html>
+    const html = generateHomepageHTML(baseUrl);
+    return new Response(html, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+        // Cache for 1 hour
+        "X-Content-Type-Options": "nosniff"
+      }
+    });
+  } catch (error) {
+    const err = error;
+    console.error("Homepage handler error:", err);
+    return new Response(`Error generating homepage: ${err.message}
+
+Stack: ${err.stack}`, {
+      status: 500,
+      headers: {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-cache"
+      }
+    });
+  }
+}
+function generateHomepageHTML(baseUrl) {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -490,18 +514,6 @@ ${baseUrl}/?githubUrl=https://github.com/user/repo/blob/main/file.md</code></pre
   </div>
 </body>
 </html>`;
-    return new Response(html, {
-      headers: {
-        "Content-Type": "text/html; charset=utf-8"
-      }
-    });
-  } catch (error) {
-    const err = error;
-    return new Response(`Error generating homepage: ${err.message}`, {
-      status: 500,
-      headers: { "Content-Type": "text/plain" }
-    });
-  }
 }
 
 // src/worker/handlers/admin.ts
@@ -1962,18 +1974,25 @@ async function handlePreviewAPI(request, env) {
 var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/assets/")) {
+    const pathname = url.pathname;
+    if (pathname === "/" && url.searchParams.has("githubUrl")) {
+      return handleEmbed(request);
+    }
+    if (pathname === "/" && !url.searchParams.has("githubUrl")) {
+      return handleHomepage(request);
+    }
+    if (pathname.startsWith("/assets/")) {
       if (env.ASSETS) {
         return env.ASSETS.fetch(request);
       }
     }
-    if (url.pathname === "/favicon.ico" || url.pathname === "/logo.svg") {
+    if (pathname === "/favicon.ico" || pathname === "/logo.svg") {
       if (env.ASSETS) {
-        const logoPath = url.pathname === "/favicon.ico" ? "/logo.svg" : url.pathname;
+        const logoPath = pathname === "/favicon.ico" ? "/logo.svg" : pathname;
         const assetRequest = new Request(new URL(logoPath, request.url), request);
         const assetResponse = await env.ASSETS.fetch(assetRequest);
         if (assetResponse.status !== 404) {
-          if (url.pathname === "/favicon.ico") {
+          if (pathname === "/favicon.ico") {
             return new Response(assetResponse.body, {
               headers: {
                 "Content-Type": "image/svg+xml",
@@ -1986,28 +2005,22 @@ var worker_default = {
       }
       return new Response("Not Found", { status: 404 });
     }
-    if (url.pathname === "/" && url.searchParams.has("githubUrl")) {
-      return handleEmbed(request);
-    }
-    if (url.pathname === "/") {
-      return handleHomepage(request);
-    }
-    if (url.pathname.startsWith("/admin")) {
+    if (pathname.startsWith("/admin")) {
       return handleAdmin(request, env);
     }
-    if (url.pathname.startsWith("/api/setup")) {
+    if (pathname.startsWith("/api/setup")) {
       return handleSetupAPI(request, env);
     }
-    if (url.pathname.startsWith("/api/auth")) {
+    if (pathname.startsWith("/api/auth")) {
       return handleAuth(request, env);
     }
-    if (url.pathname.startsWith("/api/repos")) {
+    if (pathname.startsWith("/api/repos")) {
       return handleReposAPI(request, env);
     }
-    if (url.pathname.startsWith("/api/preview")) {
+    if (pathname.startsWith("/api/preview")) {
       return handlePreviewAPI(request, env);
     }
-    if (url.pathname.startsWith("/api/content")) {
+    if (pathname.startsWith("/api/content")) {
       return handleContentAPI(request, env);
     }
     return new Response("Not Found", { status: 404 });

@@ -29,5 +29,9 @@ preview_id = "e4695b3c5f9741c9b2f7f75d26f32fe6"
 # upload.format = "modules"
 
 # Static assets configuration for admin UI
+# Note: This will serve files from ./dist/admin, but we handle root path explicitly
+# to prevent automatic index.html serving
 [assets]
 directory = "./dist/admin"
+# Exclude root index.html from automatic serving - we handle it manually
+# Cloudflare may auto-serve index.html for navigation requests, so we handle / explicitly

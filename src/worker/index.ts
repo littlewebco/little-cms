@@ -26,25 +26,43 @@ interface Env {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const pathname = url.pathname;
     
-    // Handle static assets first (CSS, JS, images, etc.)
+    // CRITICAL: Handle root path FIRST before any asset handling
+    // Cloudflare's assets binding may intercept /index.html automatically for navigation requests
+    // We must handle the root path explicitly before assets can interfere
+    
+    // Handle embed requests (original GitShow functionality)
+    if (pathname === '/' && url.searchParams.has('githubUrl')) {
+      return handleEmbed(request);
+    }
+    
+    // Handle homepage (root path without githubUrl)
+    // Check for navigation requests explicitly to prevent asset interception
+    if (pathname === '/' && !url.searchParams.has('githubUrl')) {
+      // Always serve homepage for root path, regardless of headers
+      return handleHomepage(request);
+    }
+    
+    // Handle static assets (CSS, JS, images, etc.)
     // With [assets] configuration, we use the ASSETS binding
-    if (url.pathname.startsWith('/assets/')) {
+    // Only handle /assets/ paths, not root paths
+    if (pathname.startsWith('/assets/')) {
       if (env.ASSETS) {
         return env.ASSETS.fetch(request);
       }
     }
     
     // Handle favicon and logo requests
-    if (url.pathname === '/favicon.ico' || url.pathname === '/logo.svg') {
+    if (pathname === '/favicon.ico' || pathname === '/logo.svg') {
       if (env.ASSETS) {
         // Try to serve from assets first (logo.svg)
-        const logoPath = url.pathname === '/favicon.ico' ? '/logo.svg' : url.pathname;
+        const logoPath = pathname === '/favicon.ico' ? '/logo.svg' : pathname;
         const assetRequest = new Request(new URL(logoPath, request.url), request);
         const assetResponse = await env.ASSETS.fetch(assetRequest);
         if (assetResponse.status !== 404) {
           // For favicon.ico requests, serve logo.svg with appropriate content type
-          if (url.pathname === '/favicon.ico') {
+          if (pathname === '/favicon.ico') {
             return new Response(assetResponse.body, {
               headers: {
                 'Content-Type': 'image/svg+xml',
@@ -59,44 +77,33 @@ export default {
       return new Response('Not Found', { status: 404 });
     }
     
-    // Handle embed requests (original GitShow functionality)
-    // Must check this BEFORE the homepage route
-    if (url.pathname === '/' && url.searchParams.has('githubUrl')) {
-      return handleEmbed(request);
-    }
-    
-    // Handle homepage (root path without githubUrl)
-    if (url.pathname === '/') {
-      return handleHomepage(request);
-    }
-    
     // Admin UI routes
-    if (url.pathname.startsWith('/admin')) {
+    if (pathname.startsWith('/admin')) {
       return handleAdmin(request, env);
     }
     
     // Setup API routes
-    if (url.pathname.startsWith('/api/setup')) {
+    if (pathname.startsWith('/api/setup')) {
       return handleSetupAPI(request, env);
     }
     
     // Auth API routes
-    if (url.pathname.startsWith('/api/auth')) {
+    if (pathname.startsWith('/api/auth')) {
       return handleAuth(request, env);
     }
     
     // Repositories API routes (for selecting which repos to use)
-    if (url.pathname.startsWith('/api/repos')) {
+    if (pathname.startsWith('/api/repos')) {
       return handleReposAPI(request, env);
     }
     
     // Preview API routes (for markdown rendering)
-    if (url.pathname.startsWith('/api/preview')) {
+    if (pathname.startsWith('/api/preview')) {
       return handlePreviewAPI(request, env);
     }
     
     // Content API routes
-    if (url.pathname.startsWith('/api/content')) {
+    if (pathname.startsWith('/api/content')) {
       return handleContentAPI(request, env);
     }
     

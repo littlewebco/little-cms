@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Save, Eye, Code, Trash2 } from 'lucide-react';
+import { Save, Eye, Code, Trash2, X, Menu } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface GitHubFile {
   name: string;
@@ -108,6 +109,7 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
   const [frontMatter, setFrontMatter] = useState<FrontMatter>({});
   const [body, setBody] = useState('');
   const [originalContent, setOriginalContent] = useState('');
+  const [showFrontMatter, setShowFrontMatter] = useState(false);
 
   // Fetch file content
   const { data, isLoading, error } = useQuery({
@@ -295,63 +297,141 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
   return (
     <div className="h-full flex flex-col border rounded-lg">
       {/* Toolbar */}
-      <div className="p-3 border-b bg-muted/50 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{file.name}</span>
+      <div className="p-2 sm:p-3 border-b bg-muted/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium text-sm sm:text-base truncate">{file.name}</span>
           {hasChanges && (
-            <span className="text-xs px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded">
-              Unsaved changes
+            <span className="text-xs px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded flex-shrink-0">
+              Unsaved
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
+          {viewMode === 'edit' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowFrontMatter(!showFrontMatter)}
+              className="lg:hidden"
+              aria-label="Toggle front matter"
+            >
+              <Menu className="w-4 h-4" />
+            </Button>
+          )}
           <Button
             variant={viewMode === 'edit' ? 'default' : 'outline'}
             size="sm"
             onClick={() => setViewMode('edit')}
+            className="text-xs sm:text-sm"
           >
-            <Code className="w-4 h-4 mr-2" />
-            Edit
+            <Code className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Edit</span>
           </Button>
           <Button
             variant={viewMode === 'preview' ? 'default' : 'outline'}
             size="sm"
             onClick={() => setViewMode('preview')}
+            className="text-xs sm:text-sm"
           >
-            <Eye className="w-4 h-4 mr-2" />
-            Preview
+            <Eye className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Preview</span>
           </Button>
           <Button
             size="sm"
             onClick={handleSave}
             disabled={saveMutation.isPending || !hasChanges}
+            className="text-xs sm:text-sm"
           >
-            <Save className="w-4 h-4 mr-2" />
-            {saveMutation.isPending ? 'Saving...' : 'Save'}
+            <Save className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{saveMutation.isPending ? 'Saving...' : 'Save'}</span>
+            <span className="sm:hidden">{saveMutation.isPending ? '...' : 'Save'}</span>
           </Button>
           <Button
             variant="destructive"
             size="sm"
             onClick={handleDelete}
             disabled={deleteMutation.isPending}
+            className="text-xs sm:text-sm"
           >
-            <Trash2 className="w-4 h-4 mr-2" />
-            {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
+            <Trash2 className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{deleteMutation.isPending ? 'Deleting...' : 'Delete'}</span>
+            <span className="sm:hidden">{deleteMutation.isPending ? '...' : 'Del'}</span>
           </Button>
           {onClose && (
-            <Button variant="outline" size="sm" onClick={onClose}>
-              Close
+            <Button variant="outline" size="sm" onClick={onClose} className="text-xs sm:text-sm">
+              <X className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Close</span>
             </Button>
           )}
         </div>
       </div>
 
       {/* Editor Content */}
-      <div className="flex-1 overflow-hidden flex">
-        {/* Front Matter Sidebar */}
+      <div className="flex-1 overflow-hidden flex flex-col lg:flex-row">
+        {/* Front Matter Sidebar - Desktop */}
         {viewMode === 'edit' && (
-          <div className="w-64 border-r p-4 overflow-y-auto bg-muted/30">
-            <h3 className="font-semibold mb-4">Front Matter</h3>
+          <div className={cn(
+            "hidden lg:block w-64 border-r p-4 overflow-y-auto bg-muted/30",
+            "lg:flex-shrink-0"
+          )}>
+            <h3 className="font-semibold mb-4 text-sm">Front Matter</h3>
+            <div className="space-y-3">
+              {Object.entries(frontMatter).map(([key, value]) => (
+                <div key={key}>
+                  <label className="text-xs font-medium text-muted-foreground block mb-1">
+                    {key}
+                  </label>
+                  <input
+                    type="text"
+                    value={String(value)}
+                    onChange={(e) => {
+                      const newValue = e.target.value;
+                      // Try to parse as number or boolean
+                      if (newValue === 'true') {
+                        handleFrontMatterChange(key, true);
+                      } else if (newValue === 'false') {
+                        handleFrontMatterChange(key, false);
+                      } else if (!isNaN(Number(newValue))) {
+                        handleFrontMatterChange(key, Number(newValue));
+                      } else {
+                        handleFrontMatterChange(key, newValue);
+                      }
+                    }}
+                    className="w-full px-2 py-1 text-sm border rounded bg-background text-foreground border-input"
+                  />
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-4"
+                onClick={() => {
+                  const key = prompt('Field name:');
+                  if (key) {
+                    handleFrontMatterChange(key, '');
+                  }
+                }}
+              >
+                + Add Field
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Front Matter Sidebar - Mobile Drawer */}
+        {viewMode === 'edit' && showFrontMatter && (
+          <div className="lg:hidden border-b p-4 overflow-y-auto bg-muted/30 max-h-64">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-sm">Front Matter</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowFrontMatter(false)}
+                className="h-8 w-8 p-0"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
             <div className="space-y-3">
               {Object.entries(frontMatter).map(([key, value]) => (
                 <div key={key}>
@@ -397,11 +477,11 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
 
         {/* Markdown Editor */}
         {viewMode === 'edit' && (
-          <div className="flex-1 flex flex-col">
+          <div className="flex-1 flex flex-col min-w-0">
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              className="flex-1 w-full p-4 font-mono text-sm border-0 resize-none focus:outline-none bg-background text-foreground placeholder:text-muted-foreground"
+              className="flex-1 w-full p-3 sm:p-4 font-mono text-sm border-0 resize-none focus:outline-none bg-background text-foreground placeholder:text-muted-foreground"
               placeholder="Start writing markdown..."
             />
           </div>
@@ -409,7 +489,7 @@ export default function MarkdownEditor({ repo, file, onClose }: MarkdownEditorPr
 
         {/* Preview */}
         {viewMode === 'preview' && (
-          <div className="flex-1 p-8 overflow-y-auto prose prose-sm max-w-none">
+          <div className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto prose prose-sm max-w-none">
             {isPreviewLoading ? (
               <div className="text-muted-foreground">Rendering preview...</div>
             ) : (

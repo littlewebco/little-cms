@@ -584,19 +584,21 @@ ${data.excerpt || 'Start writing your content here...'}
         <Modal
           isOpen={!!selectedFile}
           onClose={handleCloseModal}
-          title={`${selectedFile.file.name} - ${selectedFile.repo}`}
-          size="xl"
+          title={`${selectedFile.file.name}`}
+          size="full"
         >
-          <MarkdownEditor
-            repo={selectedFile.repo}
-            file={{
-              name: selectedFile.file.name,
-              path: selectedFile.file.path,
-              sha: selectedFile.file.sha,
-              type: 'file',
-            }}
-            onClose={handleCloseModal}
-          />
+          <div className="h-full min-h-[60vh] sm:min-h-[70vh]">
+            <MarkdownEditor
+              repo={selectedFile.repo}
+              file={{
+                name: selectedFile.file.name,
+                path: selectedFile.file.path,
+                sha: selectedFile.file.sha,
+                type: 'file',
+              }}
+              onClose={handleCloseModal}
+            />
+          </div>
         </Modal>
       )}
     </div>

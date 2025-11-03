@@ -40,7 +40,13 @@ export default {
                            acceptHeader.includes('application/javascript');
     
     // Handle embed requests (original GitShow functionality)
-    // Priority: Script requests with githubUrl OR any request with githubUrl
+    // Use /embed path to avoid conflicts with assets binding
+    if (pathname === '/embed' && url.searchParams.has('githubUrl')) {
+      return handleEmbed(request);
+    }
+    
+    // Legacy support: Handle embed requests at root path (for backward compatibility)
+    // This allows existing embeds to continue working
     if (pathname === '/' && url.searchParams.has('githubUrl')) {
       return handleEmbed(request);
     }
@@ -51,9 +57,9 @@ export default {
       return handleHomepage(request);
     }
     
-    // If it's a script request to root without githubUrl, return 404
+    // If it's a script request to root without githubUrl, redirect to /embed with error
     if (pathname === '/' && isScriptRequest && !url.searchParams.has('githubUrl')) {
-      return new Response('Error: Missing githubUrl parameter', { 
+      return new Response('Error: Missing githubUrl parameter. Use /embed?githubUrl=... instead of /?githubUrl=...', { 
         status: 400,
         headers: { 'Content-Type': 'text/javascript' }
       });

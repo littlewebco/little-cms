@@ -68,7 +68,7 @@ LittleCMS Embed is built on a modern serverless architecture:
 ```
 User's Website
     ↓
-<script src="https://cms.little.cloud/?githubUrl=...">
+<script src="https://cms.little.cloud/embed?githubUrl=...">
     ↓
 Cloudflare Worker (Edge)
     ↓
@@ -101,7 +101,7 @@ The simplest way to embed content is to add a script tag pointing to a GitHub fi
   <h1>Welcome</h1>
   
   <!-- Embed a markdown file -->
-  <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/readme.md"></script>
+  <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/readme.md"></script>
   
   <footer>Footer content</footer>
 </body>
@@ -114,13 +114,15 @@ LittleCMS accepts two GitHub URL formats:
 
 **Format 1: Raw GitHub URL** (Recommended)
 ```html
-<script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/branch/path/to/file.md"></script>
+<script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/branch/path/to/file.md"></script>
 ```
 
 **Format 2: GitHub.com URL** (Auto-converted)
 ```html
-<script src="https://cms.little.cloud/?githubUrl=https://github.com/user/repo/blob/branch/path/to/file.md"></script>
+<script src="https://cms.little.cloud/embed?githubUrl=https://github.com/user/repo/blob/branch/path/to/file.md"></script>
 ```
+
+> **Important:** The embed endpoint is `/embed` (not `/`) to avoid conflicts with the homepage route. Using `/embed` ensures your embeds work reliably without being intercepted by Cloudflare's assets binding.
 
 ### URL Parameters
 
@@ -144,7 +146,7 @@ LittleCMS accepts two GitHub URL formats:
   
   <main>
     <!-- Embed a blog post from GitHub -->
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/username/blog-repo/main/posts/2024-01-15-my-first-post.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/username/blog-repo/main/posts/2024-01-15-my-first-post.md"></script>
   </main>
   
   <footer>
@@ -173,17 +175,17 @@ You can embed multiple files on the same page:
   
   <section id="getting-started">
     <h2>Getting Started</h2>
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/getting-started.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/getting-started.md"></script>
   </section>
   
   <section id="api-reference">
     <h2>API Reference</h2>
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/api.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/api.md"></script>
   </section>
   
   <section id="examples">
     <h2>Code Examples</h2>
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/examples/example.js"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/examples/example.js"></script>
   </section>
 </body>
 </html>
@@ -201,7 +203,7 @@ Wrap embeds in custom containers for better control:
   </div>
   
   <div class="blog-post-content">
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/posts/post.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/posts/post.md"></script>
   </div>
   
   <div class="blog-post-footer">
@@ -217,7 +219,7 @@ You can dynamically load embeds using JavaScript:
 ```javascript
 function loadEmbed(githubUrl, containerId) {
   const script = document.createElement('script');
-  script.src = `https://cms.little.cloud/?githubUrl=${encodeURIComponent(githubUrl)}`;
+  script.src = `https://cms.little.cloud/embed?githubUrl=${encodeURIComponent(githubUrl)}`;
   
   const container = document.getElementById(containerId);
   if (container) {
@@ -434,7 +436,7 @@ Apply the styles by wrapping your embed in a container:
 
 ```html
 <div class="littlecms-embed">
-  <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/post.md"></script>
+  <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/post.md"></script>
 </div>
 ```
 
@@ -511,7 +513,7 @@ body > div:has(script[src*="cms.little.cloud"]) {
 </head>
 <body>
   <article class="blog-post">
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/posts/post.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/posts/post.md"></script>
   </article>
 </body>
 </html>
@@ -592,7 +594,7 @@ body > div:has(script[src*="cms.little.cloud"]) {
     </nav>
     
     <main class="docs-content">
-      <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/index.md"></script>
+      <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/docs/index.md"></script>
     </main>
   </div>
 </body>
@@ -656,7 +658,7 @@ body > div:has(script[src*="cms.little.cloud"]) {
 </head>
 <body>
   <div class="content">
-    <script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/content.md"></script>
+    <script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/content.md"></script>
   </div>
 </body>
 </html>
@@ -745,7 +747,7 @@ body > div:has(script[src*="cms.little.cloud"]) {
 
 **Example**:
 ```html
-<script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/example.js"></script>
+<script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/example.js"></script>
 ```
 
 ### Plain Text Files
@@ -825,10 +827,10 @@ Always use `raw.githubusercontent.com` URLs when possible for better performance
 
 ```html
 <!-- Good -->
-<script src="https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md"></script>
+<script src="https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md"></script>
 
 <!-- Also works, but auto-converted -->
-<script src="https://cms.little.cloud/?githubUrl=https://github.com/user/repo/blob/main/file.md"></script>
+<script src="https://cms.little.cloud/embed?githubUrl=https://github.com/user/repo/blob/main/file.md"></script>
 ```
 
 ### 2. Wrap Embeds in Containers
@@ -917,7 +919,7 @@ If you need more control, you can wrap the embed script:
     (function() {
       const wrapper = document.getElementById('content-wrapper');
       const script = document.createElement('script');
-      script.src = 'https://cms.little.cloud/?githubUrl=https://raw.githubusercontent.com/user/repo/main/content.md';
+      script.src = 'https://cms.little.cloud/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/content.md';
       script.onerror = function() {
         wrapper.innerHTML = '<p>Error loading content. Please try again later.</p>';
       };
@@ -934,8 +936,10 @@ If you need more control, you can wrap the embed script:
 ### Endpoint
 
 ```
-GET https://cms.little.cloud/?githubUrl={url}
+GET https://cms.little.cloud/embed?githubUrl={url}
 ```
+
+> **Note:** The endpoint is `/embed` (not `/`) to avoid conflicts with the homepage route.
 
 ### Parameters
 

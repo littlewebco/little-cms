@@ -462,10 +462,10 @@ function generateHomepageHTML(baseUrl) {
         <div class="demo-section">
           <h3>Example 1: Markdown File</h3>
           <p>This markdown file is embedded directly from GitHub:</p>
-          <pre><code>&lt;script src="${baseUrl}/?githubUrl=https://raw.githubusercontent.com/linq84/gitshow/main/readme.md"&gt;&lt;/script&gt;</code></pre>
+          <pre><code>&lt;script src="${baseUrl}/embed?githubUrl=https://raw.githubusercontent.com/linq84/gitshow/main/readme.md"&gt;&lt;/script&gt;</code></pre>
           
           <div class="example">
-            <script src="${baseUrl}/?githubUrl=https://raw.githubusercontent.com/linq84/gitshow/main/readme.md"></script>
+            <script src="${baseUrl}/embed?githubUrl=https://raw.githubusercontent.com/linq84/gitshow/main/readme.md"></script>
           </div>
         </div>
       </div>
@@ -475,7 +475,7 @@ function generateHomepageHTML(baseUrl) {
         
         <h3>Embedding Content</h3>
         <p>Add this script tag anywhere in your HTML to embed GitHub content:</p>
-        <pre><code>&lt;script src="${baseUrl}/?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md"&gt;&lt;/script&gt;</code></pre>
+        <pre><code>&lt;script src="${baseUrl}/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md"&gt;&lt;/script&gt;</code></pre>
         
         <h3>Supported Formats</h3>
         <ul>
@@ -485,9 +485,10 @@ function generateHomepageHTML(baseUrl) {
         </ul>
         
         <h3>URL Formats</h3>
-        <p>You can use either format:</p>
-        <pre><code>${baseUrl}/?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md
-${baseUrl}/?githubUrl=https://github.com/user/repo/blob/main/file.md</code></pre>
+        <p>You can use either GitHub URL format:</p>
+        <pre><code>${baseUrl}/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md
+    ${baseUrl}/embed?githubUrl=https://github.com/user/repo/blob/main/file.md</code></pre>
+        <p><strong>Note:</strong> The embed endpoint is <code>/embed</code> to avoid conflicts with the homepage.</p>
       </div>
       
       <div class="section">
@@ -1995,11 +1996,23 @@ var worker_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const pathname = url.pathname;
+    const secFetchDest = request.headers.get("Sec-Fetch-Dest");
+    const acceptHeader = request.headers.get("Accept") || "";
+    const isScriptRequest = secFetchDest === "script" || acceptHeader.includes("text/javascript") || acceptHeader.includes("application/javascript");
+    if (pathname === "/embed" && url.searchParams.has("githubUrl")) {
+      return handleEmbed(request);
+    }
     if (pathname === "/" && url.searchParams.has("githubUrl")) {
       return handleEmbed(request);
     }
-    if (pathname === "/" && !url.searchParams.has("githubUrl")) {
+    if (pathname === "/" && !url.searchParams.has("githubUrl") && !isScriptRequest) {
       return handleHomepage(request);
+    }
+    if (pathname === "/" && isScriptRequest && !url.searchParams.has("githubUrl")) {
+      return new Response("Error: Missing githubUrl parameter. Use /embed?githubUrl=... instead of /?githubUrl=...", {
+        status: 400,
+        headers: { "Content-Type": "text/javascript" }
+      });
     }
     if (pathname.startsWith("/assets/")) {
       if (env.ASSETS) {

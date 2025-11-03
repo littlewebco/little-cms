@@ -372,7 +372,7 @@ LittleCMS includes the original GitShow embed functionality:
 ### Basic Usage
 
 ```html
-<script src="https://your-domain.com/?githubUrl=https://raw.githubusercontent.com/user/repo/main/post.md"></script>
+<script src="https://your-domain.com/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/post.md"></script>
 ```
 
 ### Supported Formats
@@ -386,9 +386,11 @@ LittleCMS includes the original GitShow embed functionality:
 Both formats are supported:
 
 ```
-https://your-domain.com/?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md
-https://your-domain.com/?githubUrl=https://github.com/user/repo/blob/main/file.md
+https://your-domain.com/embed?githubUrl=https://raw.githubusercontent.com/user/repo/main/file.md
+https://your-domain.com/embed?githubUrl=https://github.com/user/repo/blob/main/file.md
 ```
+
+> **Note:** The embed endpoint is `/embed` (not `/`) to avoid conflicts with the homepage route. Using `/embed` ensures embeds work reliably without being intercepted by Cloudflare's assets binding.
 
 ### Security
 

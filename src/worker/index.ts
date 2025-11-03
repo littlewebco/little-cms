@@ -32,16 +32,31 @@ export default {
     // Cloudflare's assets binding may intercept /index.html automatically for navigation requests
     // We must handle the root path explicitly before assets can interfere
     
+    // Detect script requests (from <script> tags)
+    const secFetchDest = request.headers.get('Sec-Fetch-Dest');
+    const acceptHeader = request.headers.get('Accept') || '';
+    const isScriptRequest = secFetchDest === 'script' || 
+                           acceptHeader.includes('text/javascript') || 
+                           acceptHeader.includes('application/javascript');
+    
     // Handle embed requests (original GitShow functionality)
+    // Priority: Script requests with githubUrl OR any request with githubUrl
     if (pathname === '/' && url.searchParams.has('githubUrl')) {
       return handleEmbed(request);
     }
     
     // Handle homepage (root path without githubUrl)
-    // Check for navigation requests explicitly to prevent asset interception
-    if (pathname === '/' && !url.searchParams.has('githubUrl')) {
-      // Always serve homepage for root path, regardless of headers
+    // Only serve homepage for non-script requests to prevent asset interception
+    if (pathname === '/' && !url.searchParams.has('githubUrl') && !isScriptRequest) {
       return handleHomepage(request);
+    }
+    
+    // If it's a script request to root without githubUrl, return 404
+    if (pathname === '/' && isScriptRequest && !url.searchParams.has('githubUrl')) {
+      return new Response('Error: Missing githubUrl parameter', { 
+        status: 400,
+        headers: { 'Content-Type': 'text/javascript' }
+      });
     }
     
     // Handle static assets (CSS, JS, images, etc.)

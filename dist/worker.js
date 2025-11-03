@@ -124,10 +124,11 @@ async function handleEmbed(request) {
     } else {
       renderedContent = `<pre>${escapeHtml(fileContent)}</pre>`;
     }
-    return new Response(`
-      (function() {
+    const escapedContent = JSON.stringify(renderedContent);
+    return new Response(
+      `(function() {
         const contentDiv = document.createElement('div');
-        contentDiv.innerHTML = \`${renderedContent.replace(/`/g, "\\`")}\`;
+        contentDiv.innerHTML = ${escapedContent};
 
         const scriptTag = document.currentScript;
 
@@ -138,37 +139,44 @@ async function handleEmbed(request) {
           console.warn('LittleCMS: Could not find the initiating script tag. Appending content to body.');
           document.body.appendChild(contentDiv);
         }
-      })();
-    `, {
-      headers: { "Content-Type": "text/javascript" }
-    });
+      })();`,
+      {
+        headers: {
+          "Content-Type": "text/javascript; charset=utf-8",
+          "Access-Control-Allow-Origin": "*"
+        }
+      }
+    );
   } catch (error) {
     const err = error;
     console.error("LittleCMS Worker Error:", err);
     const errorMessage = `Error processing request: ${err.message}`;
-    return new Response(`
-      (function() {
+    const escapedErrorMessage = JSON.stringify(`LittleCMS Error: ${errorMessage}`);
+    return new Response(
+      `(function() {
         const errorDiv = document.createElement('div');
         errorDiv.style.color = 'red';
         errorDiv.style.border = '1px solid red';
         errorDiv.style.padding = '10px';
-        errorDiv.textContent = 'LittleCMS Error: ${escapeHtml(errorMessage)}';
+        errorDiv.textContent = ${escapedErrorMessage};
         const scriptTag = document.currentScript;
         if (scriptTag) {
           scriptTag.parentNode.insertBefore(errorDiv, scriptTag);
           scriptTag.remove();
         } else {
-          console.error('LittleCMS Error:', '${escapeHtml(errorMessage)}');
+          console.error('LittleCMS Error:', ${escapedErrorMessage});
           document.body.appendChild(errorDiv);
         }
-      })();
-    `, {
-      headers: {
-        "Content-Type": "text/javascript",
-        "X-LittleCMS-Error": "true"
-      },
-      status: 500
-    });
+      })();`,
+      {
+        headers: {
+          "Content-Type": "text/javascript; charset=utf-8",
+          "Access-Control-Allow-Origin": "*",
+          "X-LittleCMS-Error": "true"
+        },
+        status: 500
+      }
+    );
   }
 }
 

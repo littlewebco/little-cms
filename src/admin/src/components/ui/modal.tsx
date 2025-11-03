@@ -43,7 +43,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'lg' }:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
@@ -61,8 +61,8 @@ export default function Modal({ isOpen, onClose, title, children, size = 'lg' }:
       >
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between p-6 border-b">
-            <h2 className="text-xl font-semibold">{title}</h2>
+          <div className="flex items-center justify-between p-4 sm:p-6 border-b">
+            <h2 className="text-lg sm:text-xl font-semibold">{title}</h2>
             <Button
               variant="ghost"
               size="sm"
@@ -75,7 +75,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'lg' }:
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {children}
         </div>
       </div>

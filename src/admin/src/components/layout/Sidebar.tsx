@@ -37,7 +37,11 @@ const navigation: SidebarItem[] = [
   },
 ];
 
-export default function Sidebar() {
+interface SidebarProps {
+  onNavigate?: () => void;
+}
+
+export default function Sidebar({ onNavigate }: SidebarProps) {
   const location = useLocation();
   const { resolvedTheme, toggleTheme } = useTheme();
 
@@ -48,11 +52,17 @@ export default function Sidebar() {
     return location.pathname.startsWith(href);
   };
 
+  const handleNavigate = () => {
+    if (onNavigate) {
+      onNavigate();
+    }
+  };
+
   return (
-    <aside className="w-64 border-r bg-muted/30 flex flex-col h-screen sticky top-0">
+    <aside className="w-full lg:w-64 border-r bg-muted/30 flex flex-col h-screen lg:sticky lg:top-0">
       {/* Logo */}
-      <div className="p-6 border-b">
-        <Link to="/admin" className="flex items-center gap-2">
+      <div className="p-4 lg:p-6 border-b">
+        <Link to="/admin" className="flex items-center gap-2" onClick={handleNavigate}>
           <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground">
             <Logo className="w-5 h-5" />
           </div>
@@ -70,6 +80,7 @@ export default function Sidebar() {
             <Link
               key={item.href}
               to={item.href}
+              onClick={handleNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                 isActive(item.href)
@@ -77,7 +88,7 @@ export default function Sidebar() {
                   : 'text-muted-foreground hover:bg-muted hover:text-foreground'
               )}
             >
-              <Icon className="w-5 h-5" />
+              <Icon className="w-5 h-5 flex-shrink-0" />
               {item.title}
             </Link>
           );
@@ -88,7 +99,10 @@ export default function Sidebar() {
       <div className="p-4 border-t space-y-2">
         <Button 
           className="w-full" 
-          onClick={() => window.location.href = '/admin/content'}
+          onClick={() => {
+            handleNavigate();
+            window.location.href = '/admin/content';
+          }}
         >
           <Plus className="w-4 h-4 mr-2" />
           New Post

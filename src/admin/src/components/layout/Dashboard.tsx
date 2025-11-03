@@ -330,14 +330,14 @@ ${data.excerpt || 'Start writing your content here...'}
       />
       <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold">Dashboard</h2>
-          <p className="text-muted-foreground mt-1">
+          <h2 className="text-2xl sm:text-3xl font-bold">Dashboard</h2>
+          <p className="text-muted-foreground mt-1 text-sm sm:text-base">
             Manage your content across {stats.totalRepos} {stats.totalRepos === 1 ? 'repository' : 'repositories'}
           </p>
         </div>
-        <Button onClick={handleCreatePost} size="lg">
+        <Button onClick={handleCreatePost} size="lg" className="w-full sm:w-auto">
           <Plus className="w-4 h-4 mr-2" />
           New Post
         </Button>

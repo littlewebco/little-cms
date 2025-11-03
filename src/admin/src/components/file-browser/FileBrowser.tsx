@@ -82,7 +82,14 @@ export default function FileBrowser({ repo, onFileSelect }: FileBrowserProps) {
   // Move a single file (updates front matter for markdown files)
   const moveSingleFile = async (oldPath: string, newPath: string) => {
     // Get current file content
-    const fileData = await api.content.get(repo, oldPath) as any;
+    let fileData: any;
+    try {
+      fileData = await api.content.get(repo, oldPath) as any;
+    } catch (error) {
+      console.error('Error fetching file for move:', error);
+      throw new Error(`Failed to fetch file ${oldPath}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+    
     let content = '';
     
     if (fileData.content) {
@@ -92,8 +99,18 @@ export default function FileBrowser({ repo, onFileSelect }: FileBrowserProps) {
         content = fileData.content;
       }
     } else if (fileData.download_url) {
-      const response = await fetch(fileData.download_url);
-      content = await response.text();
+      try {
+        const response = await fetch(fileData.download_url);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file content: ${response.status} ${response.statusText}`);
+        }
+        content = await response.text();
+      } catch (error) {
+        console.error('Error fetching file from download_url:', error);
+        throw new Error(`Failed to fetch file content: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } else {
+      throw new Error('File content not found');
     }
 
     // If it's a markdown file, update front matter with category
@@ -183,10 +200,22 @@ ${body}`;
     }
 
     // Create file in new location
-    await api.content.create(repo, newPath, content, `Move file: ${oldPath} → ${newPath}`);
+    try {
+      await api.content.create(repo, newPath, content, `Move file: ${oldPath} → ${newPath}`);
+    } catch (error) {
+      console.error('Error creating file at new location:', error);
+      throw new Error(`Failed to create file at ${newPath}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
     
     // Delete old file
-    await api.content.delete(repo, oldPath, `Move file: ${oldPath} → ${newPath}`);
+    try {
+      await api.content.delete(repo, oldPath, `Move file: ${oldPath} → ${newPath}`);
+    } catch (error) {
+      console.error('Error deleting old file:', error);
+      // Note: We don't throw here because the file was already moved
+      // But we should log it for cleanup
+      console.warn(`Warning: File moved to ${newPath} but failed to delete ${oldPath}. Manual cleanup may be needed.`);
+    }
   };
 
   // Move folder recursively
@@ -539,9 +568,6 @@ ${data.excerpt || 'Start writing your content here...'}
               .map((file) => (
                 <div
                   key={file.sha}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, file)}
-                  onDragEnd={handleDragEnd}
                   onDragOver={(e) => handleDragOver(e, file.type === 'dir' ? file.path : undefined)}
                   onDragLeave={handleDragLeave}
                   onDrop={(e) => {
@@ -553,7 +579,6 @@ ${data.excerpt || 'Start writing your content here...'}
                     w-full p-3 flex items-center gap-3 text-left transition-colors
                     ${draggedItem?.path === file.path ? 'opacity-50' : ''}
                     ${dragOverPath === file.path && file.type === 'dir' ? 'bg-primary/20 border-2 border-primary' : 'hover:bg-muted'}
-                    ${moveFileMutation.isPending ? 'opacity-50 cursor-wait' : 'cursor-move'}
                   `}
                   onClick={(e) => {
                     // Prevent click if dragging or if move is in progress
@@ -561,7 +586,18 @@ ${data.excerpt || 'Start writing your content here...'}
                     handleFileClick(file);
                   }}
                 >
-                  <GripVertical className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <div
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, file)}
+                    onDragEnd={handleDragEnd}
+                    className="cursor-grab active:cursor-grabbing flex-shrink-0"
+                    onClick={(e) => {
+                      // Prevent file click when clicking on drag handle
+                      e.stopPropagation();
+                    }}
+                  >
+                    <GripVertical className="w-4 h-4 text-muted-foreground hover:text-foreground transition-colors" />
+                  </div>
                   {file.type === 'dir' ? (
                     <FolderIcon className="w-5 h-5 text-blue-500 flex-shrink-0" />
                   ) : file.name.endsWith('.md') || file.name.endsWith('.markdown') ? (

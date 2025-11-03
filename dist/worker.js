@@ -524,8 +524,8 @@ var INDEX_HTML = `<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LittleCMS Admin</title>
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <script type="module" crossorigin src="/assets/index-DIrlNujT.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-83spOCk1.css">
+    <script type="module" crossorigin src="/assets/index-CemPLPZP.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BQG_2r9S.css">
   </head>
   <body>
     <div id="root"></div>
@@ -1573,10 +1573,30 @@ async function handleContentAPI(request, env) {
     }
   } catch (error) {
     const err = error;
+    console.error("Content API error:", {
+      method: request.method,
+      url: request.url,
+      path: filePath,
+      error: err.message,
+      stack: err.stack
+    });
+    let errorMessage = err.message || "Unknown error";
+    let statusCode = 500;
+    if (errorMessage.includes("GitHub API error:")) {
+      const statusMatch = errorMessage.match(/GitHub API error: (\d+)/);
+      if (statusMatch) {
+        statusCode = parseInt(statusMatch[1], 10);
+        if (statusCode >= 400 && statusCode < 500) {
+          statusCode = statusCode;
+        }
+      }
+    }
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({
+        error: errorMessage
+      }),
       {
-        status: 500,
+        status: statusCode,
         headers: { "Content-Type": "application/json" }
       }
     );

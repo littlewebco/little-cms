@@ -254,10 +254,36 @@ export async function handleContentAPI(request: Request, env?: Env): Promise<Res
     }
   } catch (error) {
     const err = error as Error;
+    console.error('Content API error:', {
+      method: request.method,
+      url: request.url,
+      path: filePath,
+      error: err.message,
+      stack: err.stack,
+    });
+    
+    // Try to extract more details from the error
+    let errorMessage = err.message || 'Unknown error';
+    let statusCode = 500;
+    
+    // Check if it's a GitHub API error with status code
+    if (errorMessage.includes('GitHub API error:')) {
+      const statusMatch = errorMessage.match(/GitHub API error: (\d+)/);
+      if (statusMatch) {
+        statusCode = parseInt(statusMatch[1], 10);
+        // Don't return 500 for client errors (4xx)
+        if (statusCode >= 400 && statusCode < 500) {
+          statusCode = statusCode;
+        }
+      }
+    }
+    
     return new Response(
-      JSON.stringify({ error: err.message }),
+      JSON.stringify({ 
+        error: errorMessage,
+      }),
       {
-        status: 500,
+        status: statusCode,
         headers: { 'Content-Type': 'application/json' },
       }
     );

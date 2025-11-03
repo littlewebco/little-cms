@@ -125,19 +125,49 @@ async function handleEmbed(request) {
       renderedContent = `<pre>${escapeHtml(fileContent)}</pre>`;
     }
     const escapedContent = JSON.stringify(renderedContent);
+    const escapedFileName = JSON.stringify(fileName);
     return new Response(
       `(function() {
         const contentDiv = document.createElement('div');
         contentDiv.innerHTML = ${escapedContent};
 
-        const scriptTag = document.currentScript;
+        const insertContent = function() {
+          const scriptTag = document.currentScript || 
+            (document.scripts && document.scripts[document.scripts.length - 1]);
+          
+          if (scriptTag && scriptTag.parentNode) {
+            scriptTag.parentNode.insertBefore(contentDiv, scriptTag);
+            scriptTag.remove();
+          } else {
+            // Fallback: find the script tag by src attribute
+            const scripts = document.querySelectorAll('script[src*="cms.little.cloud"]');
+            const fileNameMatch = ${escapedFileName};
+            const currentScript = Array.from(scripts).find(s => 
+              s.src.includes(fileNameMatch) || scripts.length === 1
+            );
+            
+            if (currentScript && currentScript.parentNode) {
+              currentScript.parentNode.insertBefore(contentDiv, currentScript);
+              currentScript.remove();
+            } else if (document.body) {
+              document.body.appendChild(contentDiv);
+            } else {
+              // Wait for DOM
+              if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                  document.body.appendChild(contentDiv);
+                });
+              } else {
+                document.body.appendChild(contentDiv);
+              }
+            }
+          }
+        };
 
-        if (scriptTag) {
-          scriptTag.parentNode.insertBefore(contentDiv, scriptTag);
-          scriptTag.remove();
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', insertContent);
         } else {
-          console.warn('LittleCMS: Could not find the initiating script tag. Appending content to body.');
-          document.body.appendChild(contentDiv);
+          insertContent();
         }
       })();`,
       {
@@ -159,13 +189,32 @@ async function handleEmbed(request) {
         errorDiv.style.border = '1px solid red';
         errorDiv.style.padding = '10px';
         errorDiv.textContent = ${escapedErrorMessage};
-        const scriptTag = document.currentScript;
-        if (scriptTag) {
-          scriptTag.parentNode.insertBefore(errorDiv, scriptTag);
-          scriptTag.remove();
-        } else {
+        
+        const insertError = function() {
+          const scriptTag = document.currentScript || 
+            (document.scripts && document.scripts[document.scripts.length - 1]);
+          
+          if (scriptTag && scriptTag.parentNode) {
+            scriptTag.parentNode.insertBefore(errorDiv, scriptTag);
+            scriptTag.remove();
+          } else if (document.body) {
+            document.body.appendChild(errorDiv);
+          } else {
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', function() {
+                document.body.appendChild(errorDiv);
+              });
+            } else {
+              document.body.appendChild(errorDiv);
+            }
+          }
           console.error('LittleCMS Error:', ${escapedErrorMessage});
-          document.body.appendChild(errorDiv);
+        };
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', insertError);
+        } else {
+          insertError();
         }
       })();`,
       {
